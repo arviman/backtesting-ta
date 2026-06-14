@@ -10,7 +10,9 @@ enum class TimeFrame(val duration: Duration) {
   H1(Duration.ofHours(1)),
   H2(Duration.ofHours(2)),
   H4(Duration.ofHours(4)),
-  D(Duration.ofDays(1));
+  D(Duration.ofDays(1)),
+  D3(Duration.ofDays(3)),
+  W(Duration.ofDays(7));
 
   companion object {
     @JvmStatic
@@ -23,6 +25,8 @@ enum class TimeFrame(val duration: Duration) {
       120 -> H2
       240 -> H4
       1440 -> D
+      4320 -> D3
+      10080 -> W
       else -> throw IllegalArgumentException("Unknown timeframe of ${duration.toMinutes()} minutes")
     }
   }

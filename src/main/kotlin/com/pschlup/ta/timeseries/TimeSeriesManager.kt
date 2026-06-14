@@ -52,4 +52,8 @@ class TimeSeriesManager(
     get() = getTimeSeries(TimeFrame.H4)
   val d: TimeSeries
     get() = getTimeSeries(TimeFrame.D)
+  val d3: TimeSeries
+    get() = getTimeSeries(TimeFrame.D3)
+  val w: TimeSeries
+    get() = getTimeSeries(TimeFrame.W)
 }
