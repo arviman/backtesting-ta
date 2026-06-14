@@ -1,7 +1,7 @@
 package com.pschlup.ta.indicators
 
 import com.google.common.truth.Truth.assertThat
-import com.pschlup.ta.timeseries.CsvBarSource.readCsvData
+import com.pschlup.ta.timeseries.readCsvBars
 import com.pschlup.ta.timeseries.TimeSeries
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -11,7 +11,7 @@ internal class AverageTrueRangeTest {
 
   @BeforeEach
   fun setup() {
-    val bars = readCsvData(
+    val bars = readCsvBars(
       javaClass.getResourceAsStream("/test_chart_data.csv") ?: error("CSV not found")
     )
     timeSeries = TimeSeries.of(bars)

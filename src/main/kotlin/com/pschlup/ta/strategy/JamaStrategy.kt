@@ -47,6 +47,14 @@ data class JamaParams(
   val sma50SlopeDeg: Double = 1.5,
   /** Minimum medium-Hurst median slope (degrees) for the long McTrend gate. */
   val mediumHurstSlopeDeg: Double = 1.0,
+
+  // --- Entry-timing knobs --------------------------------------------------
+  /**
+   * Earlier entry: drops the Hurst breakout, SMA50-slope, and medium-Hurst-slope
+   * gates from the trend filter. Keeps only the Mayer Multiple cap and a basic
+   * "SMA50 rising" check. Trades more often, takes less confirmation.
+   */
+  val earlyEntry: Boolean = false,
 )
 
 /**
@@ -96,7 +104,11 @@ fun makeJamaHccStrategy(
   val sma50Trend = Signal { i -> sma50Angle[i] > params.sma50SlopeDeg }
   val medHurstTrend = Signal { i -> medMedianAngle[i] > params.mediumHurstSlopeDeg }
 
-  val trend = hurstLongOk and mmFilter and sma50Rising and sma50Trend and medHurstTrend
+  val trend = if (params.earlyEntry) {
+    mmFilter and sma50Rising
+  } else {
+    hurstLongOk and mmFilter and sma50Rising and sma50Trend and medHurstTrend
+  }
 
   return Strategy(
     trendSignal = trend,

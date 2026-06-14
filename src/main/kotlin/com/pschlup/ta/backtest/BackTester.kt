@@ -122,11 +122,15 @@ object BackTester {
       } ?: tier.takeProfitPct!!
       Triple(tier, slDistFrac, tpDistFrac)
     }
-    val effectiveRiskPct = resolved.sumOf { (tier, slFrac, _) -> tier.quantityFraction * slFrac }
-    if (effectiveRiskPct <= 0) return
-    val maxBalanceRisk = tradeHistory.balance * spec.betSize
-    var totalAmount = maxBalanceRisk / (currentPrice * effectiveRiskPct)
     val maxAffordable = tradeHistory.balance / currentPrice
+    var totalAmount = if (spec.fixedPositionFraction != null) {
+      tradeHistory.balance * spec.fixedPositionFraction / currentPrice
+    } else {
+      val effectiveRiskPct = resolved.sumOf { (tier, slFrac, _) -> tier.quantityFraction * slFrac }
+      if (effectiveRiskPct <= 0) return
+      val maxBalanceRisk = tradeHistory.balance * spec.betSize
+      maxBalanceRisk / (currentPrice * effectiveRiskPct)
+    }
     if (totalAmount > maxAffordable) totalAmount = maxAffordable
     val long = spec.tradeType == LONG
     for ((tier, slFrac, tpFrac) in resolved) {

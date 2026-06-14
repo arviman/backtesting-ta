@@ -14,28 +14,27 @@ import com.pschlup.ta.timeseries.TimeFrame
 import com.pschlup.ta.timeseries.readCsvBars
 
 /**
- * Grid sweep of [JamaParams] with a chronological 60/40 in-sample / out-of-sample
- * holdout. Prints the top 10 by in-sample Sortino, side-by-side with the same
- * params' out-of-sample numbers — a winner on one side and a loser on the other
- * is the curve-fit one to discard.
+ * R:R × entry-mode sweep on SOL daily.
  *
- * Grid axes here (4 × 3 × 3 = 36 combos). Add or shrink axes by editing [grid].
+ * Fixes the SL distance at 2 × ATR(14) and the bet size at 10% of equity per
+ * trade, then sweeps the TP:SL ratio across two entry modes:
+ *
+ *   - earlyEntry = false → original gates (Hurst breakout + slope filters)
+ *   - earlyEntry = true  → drops late-confirmation gates
+ *
+ * Reports per-trade win %, achieved R:R, and expected value per trade — the two
+ * numbers that govern long-run edge.
  */
 object ParameterSweep {
 
-  // --- Grid axes -----------------------------------------------------------
-  private val slAtrMultValues = listOf(1.0, 1.5, 2.0, 3.0)
-  private val tpSlRatioValues = listOf(1.0, 1.5, 2.0)
-  private val changeEmaThresholdValues = listOf(0.04, 0.06, 0.08)
+  private val tpSlRatioValues = listOf(1.0, 1.5, 2.0, 2.5, 3.0, 4.0)
+  private val earlyEntryValues = listOf(false, true)
 
-  private fun grid(): List<JamaParams> =
-    slAtrMultValues.flatMap { sl ->
-      tpSlRatioValues.flatMap { r ->
-        changeEmaThresholdValues.map { th ->
-          JamaParams(slAtrMult = sl, tpSlRatio = r, changeEmaThreshold = th)
-        }
-      }
+  private fun grid(): List<JamaParams> = earlyEntryValues.flatMap { early ->
+    tpSlRatioValues.map { r ->
+      JamaParams(slAtrMult = 2.0, tpSlRatio = r, earlyEntry = early, trailingStopPct = null)
     }
+  }
 
   @JvmStatic
   fun main(args: Array<String>) {
@@ -46,26 +45,20 @@ object ParameterSweep {
     println("Bars: ${bars.size} total → in-sample ${inSample.size} | out-of-sample ${outOfSample.size}")
 
     val combos = grid()
-    println("Sweeping ${combos.size} param combinations…\n")
+    println("Sweeping ${combos.size} param combinations (fixed 10% bet/trade, SL = 2×ATR)\n")
 
-    val results = combos.mapIndexed { idx, p ->
-      print("\r[${idx + 1}/${combos.size}] running…")
-      val ins = runOne(inSample, p)
-      val oos = runOne(outOfSample, p)
-      Result(p, ins, oos)
-    }
-    println("\r" + " ".repeat(40) + "\r")
+    val results = combos.map { p -> Result(p, runOne(inSample, p), runOne(outOfSample, p)) }
 
     println(header())
-    println("-".repeat(115))
+    println("-".repeat(120))
     results
       .sortedByDescending { sortKey(it.inSample) }
-      .take(10)
       .forEach { println(it.toRow()) }
 
-    println("\nBuy-and-hold reference:")
-    println("  in-sample  : ${"%.2f%%".format(100.0 * runOne(inSample, JamaParams()).buyAndHoldProfitability)}")
-    println("  out-of-sample: ${"%.2f%%".format(100.0 * runOne(outOfSample, JamaParams()).buyAndHoldProfitability)}")
+    val bnhIn = runOne(inSample, JamaParams()).buyAndHoldProfitability
+    val bnhOut = runOne(outOfSample, JamaParams()).buyAndHoldProfitability
+    println()
+    println("Buy-and-hold reference: in-sample %.1f%% | out-of-sample %.1f%%".format(100.0 * bnhIn, 100.0 * bnhOut))
   }
 
   private fun runOne(bars: List<Bar>, params: JamaParams): BackTestReport {
@@ -75,39 +68,41 @@ object ParameterSweep {
       trailingStops = false,
       pyramidingLimit = jamaLadder(params).size,
       startingBalance = 5_000.0,
-      betSize = 0.02,
+      betSize = 0.02, // ignored when fixedPositionFraction is set
       feePerTrade = 0.0005,
       inputBars = bars,
       strategyFactory = { sm -> makeJamaHccStrategy(strategy = sm.d, params = params) },
       stopLoss = { sm -> sm.d.volatilityStop(length = 14, multiplier = 2.0) },
       entryLadder = jamaLadder(params),
       entryAtrFactory = jamaEntryAtrFactory(TimeFrame.D),
+      fixedPositionFraction = 0.10,
     )
     return BackTester.run(spec)
   }
 
-  /** Rank by Sortino, penalize NaN/Inf (zero-drawdown or zero-trade runs). */
-  private fun sortKey(r: BackTestReport): Double {
-    val s = r.sortinoRatio
-    return if (s.isFinite()) s else Double.NEGATIVE_INFINITY
-  }
+  /** Rank by expected value per trade (Sortino is misleading when DD is tiny). */
+  private fun sortKey(r: BackTestReport): Double =
+    if (r.tradeCount > 0 && r.expectedValuePerTrade.isFinite()) r.expectedValuePerTrade
+    else Double.NEGATIVE_INFINITY
 
   private data class Result(val params: JamaParams, val inSample: BackTestReport, val outSample: BackTestReport) {
     fun toRow(): String {
       val p = params
-      val paramStr = "sl=%.1f tp:sl=%.1f th=%.2f".format(p.slAtrMult, p.tpSlRatio, p.changeEmaThreshold)
-      return "%-26s | %5d %8s %8s %7s | %5d %8s %8s %7s".format(
+      val mode = if (p.earlyEntry) "early" else "late "
+      val paramStr = "%s R:R=%.1f".format(mode, p.tpSlRatio)
+      return "%-16s | %4d %6s %6s %6s %6s | %4d %6s %6s %6s %6s".format(
         paramStr,
-        inSample.tradeCount, pct(inSample.profitability), pct(inSample.maxDrawDown), fmt(inSample.sortinoRatio),
-        outSample.tradeCount, pct(outSample.profitability), pct(outSample.maxDrawDown), fmt(outSample.sortinoRatio),
+        inSample.tradeCount, pct(inSample.winRate), pct(inSample.expectedValuePerTrade), fmt(inSample.avgRewardRiskRatio), pct(inSample.profitability),
+        outSample.tradeCount, pct(outSample.winRate), pct(outSample.expectedValuePerTrade), fmt(outSample.avgRewardRiskRatio), pct(outSample.profitability),
       )
     }
   }
 
   private fun header(): String =
-    "%-26s | %5s %8s %8s %7s | %5s %8s %8s %7s".format(
-      "params", "IS#t", "IS prof", "IS DD", "IS sort",
-      "OS#t", "OS prof", "OS DD", "OS sort",
+    "%-16s | %4s %6s %6s %6s %6s | %4s %6s %6s %6s %6s".format(
+      "params",
+      "IS#t", "IS w%", "IS E[R]", "IS R:R", "IS prf",
+      "OS#t", "OS w%", "OS E[R]", "OS R:R", "OS prf",
     )
 
   private fun pct(v: Double): String = if (v.isFinite()) "%.1f%%".format(100.0 * v) else "—"

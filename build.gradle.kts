@@ -11,7 +11,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("com.pschlup.ta.RsiBaselineDemo")
+    mainClass.set("com.pschlup.ta.ParameterSweep")
 }
 
 repositories {

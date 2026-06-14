@@ -77,6 +77,13 @@ data class BackTestSpec(
    * Read at entry time only.
    */
   val entryAtrFactory: ((TimeSeriesManager) -> Indicator)? = null,
+  /**
+   * When set, every entry sizes at `balance × fraction / currentPrice`,
+   * ignoring the SL distance for sizing. The SL still triggers stops; this
+   * just decouples bet size from risk. Use with R:R-style strategies where
+   * you want a fixed bet per trade and let SL/TP handle the outcome.
+   */
+  val fixedPositionFraction: Double? = null,
 )
 
 fun interface StopLossFactory {
