@@ -86,7 +86,7 @@ object MultiAssetSoftExitTest {
       stopLoss = { sm -> sm.d.volatilityStop(length = 14, multiplier = 2.0) },
       entryLadder = ladder,
       entryAtrFactory = jamaEntryAtrFactory(TimeFrame.D),
-      fixedPositionFraction = 0.10,
+      fixedPositionFraction = 1.0, // all-in per trade
     )
     return BackTester.run(spec)
   }
