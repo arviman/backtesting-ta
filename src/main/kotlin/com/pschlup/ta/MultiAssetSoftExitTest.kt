@@ -35,7 +35,8 @@ object MultiAssetSoftExitTest {
 
   private val GOLD = "sampledata/XAU_USD.csv"
   private val SOL = "sampledata/sol_d_02012023_14062026.csv"
-  private val BTC = "sampledata/chart_data_BTC_USDT_p5_730d.csv"
+  private val BTC = "sampledata/BTC_2022_2026.csv"            // daily, full cycle 2022→2026
+  private val BTC_M5 = "sampledata/chart_data_BTC_USDT_p5_730d.csv" // M5, only last 2y, for H1/H4
 
   private val runs = listOf(
     // --- Gold (daily only) ---
@@ -49,10 +50,13 @@ object MultiAssetSoftExitTest {
     Run("SOL  D MeanRev    ", SOL)  { bars -> runMeanRev(bars, TimeFrame.D, longMaLen = 200, drawdown = 0.30) },
     Run("SOL  D MeanRev x.5", SOL)  { bars -> runMeanRev(bars, TimeFrame.D, longMaLen = 100, drawdown = 0.25) },
 
-    // --- BTC across timeframes (relaxed JAMA — best variant we found) ---
-    Run("BTC  D  JAMA relax", BTC)  { bars -> runJama(bars, TimeFrame.D,  jamaRelaxed()) },
-    Run("BTC  H4 JAMA relax", BTC)  { bars -> runJama(bars, TimeFrame.H4, jamaRelaxed()) },
-    Run("BTC  H1 JAMA relax", BTC)  { bars -> runJama(bars, TimeFrame.H1, jamaRelaxed()) },
+    // --- BTC daily (full 2022→2026 cycle) ---
+    Run("BTC  D JAMA late  ", BTC)    { bars -> runJama(bars, TimeFrame.D, jama(earlyEntry = false)) },
+    Run("BTC  D JAMA early ", BTC)    { bars -> runJama(bars, TimeFrame.D, jama(earlyEntry = true)) },
+    Run("BTC  D JAMA relax ", BTC)    { bars -> runJama(bars, TimeFrame.D, jamaRelaxed()) },
+    // --- BTC H4/H1 (still 2y M5 file — no daily data at finer TF) ---
+    Run("BTC  H4 JAMA relax", BTC_M5) { bars -> runJama(bars, TimeFrame.H4, jamaRelaxed()) },
+    Run("BTC  H1 JAMA relax", BTC_M5) { bars -> runJama(bars, TimeFrame.H1, jamaRelaxed()) },
   )
 
   @JvmStatic
