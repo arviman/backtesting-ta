@@ -24,7 +24,7 @@ object BackTestDemo {
       startingBalance = 5_000.0,
       betSize = 0.02,
       feePerTrade = 0.0005,
-      inputBars = readCsvBars("sampledata/chart_data_BTC_USDT_p5_730d.csv"),
+      inputBars = readCsvBars("sampledata/chart_data_BTC_USDT_p5_90d.csv"),
       strategyFactory = { sm -> makeJamaHccStrategy(sm) },
       stopLoss = { sm -> sm.h4.volatilityStop(length = 4, multiplier = 0.2) }
     )
@@ -58,15 +58,19 @@ object BackTestDemo {
     val h4Close = h4.closePrice
 
     // --- jarvis entry: smoothed-RSI delta ------------------------------------
-    val rsi = h1Close.rsi(18)
-    val changeEma = rsi.ema(3).ema(12).change()
+    // ponytail: each recursive ema/rma layer needs caching, else chained
+    //   ema(ema(rsi)) is O(31^k) per bar evaluation.
+    val rsi = h1Close.rsi(18).cached(h1)
+    val rsiSmooth1 = rsi.ema(3).cached(h1)
+    val rsiSmooth2 = rsiSmooth1.ema(12).cached(h1)
+    val changeEma = rsiSmooth2.change()
     val longThreshold = 0.06
     val closeDelta = 0.02
     val jarvisLong = changeEma isOver longThreshold
 
     // --- MA entry: close > ZEMA(5) > SMA(21) ---------------------------------
-    val zema5 = h1Close.zema(5)
-    val sma21 = h1Close.sma(21)
+    val zema5 = h1Close.zema(5).cached(h1)
+    val sma21 = h1Close.sma(21).cached(h1)
     val maLong = (h1Close isOver zema5) and (zema5 isOver sma21)
 
     val longEntry = jarvisLong or maLong

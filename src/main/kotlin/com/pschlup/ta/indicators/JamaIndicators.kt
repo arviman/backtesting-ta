@@ -2,9 +2,28 @@
 
 package com.pschlup.ta.indicators
 
+import com.pschlup.ta.timeseries.Bar
 import com.pschlup.ta.timeseries.TimeSeries
 import kotlin.math.PI
 import kotlin.math.atan
+
+/**
+ * Per-bar memoizing wrapper. Cache is keyed by index and invalidated when the
+ * series' latest bar identity changes. Required to make chained recursive
+ * indicators (e.g. `ema(ema(rsi))`) finish in reasonable time.
+ */
+fun Indicator.cached(series: TimeSeries): Indicator {
+  val cache = HashMap<Int, Double>()
+  var lastBar: Bar? = null
+  return Indicator { i ->
+    val current = series.latestBar
+    if (current !== lastBar) {
+      cache.clear()
+      lastBar = current
+    }
+    cache.getOrPut(i) { this.valueAt(i) }
+  }
+}
 
 /** Bar-over-bar change: x[index] - x[index+1]. Mirrors Pine's `ta.change`. */
 fun Indicator.change(): Indicator = Indicator { i -> this[i] - this[i + 1] }
@@ -24,7 +43,7 @@ fun Indicator.zema(length: Int): Indicator {
  * Mirrors the Pine `angle()` helper used by JAMA.
  */
 fun TimeSeries.angle(src: Indicator, atrLength: Int = 14): Indicator {
-  val atr = this.averageTrueRange(atrLength)
+  val atr = this.averageTrueRange(atrLength).cached(this)
   val rad2deg = 180.0 / PI
   return Indicator { i ->
     val a = atr[i]
@@ -39,8 +58,8 @@ fun TimeSeries.hurstChannel(length: Int = 10, multiplier: Double = 1.0): HurstCh
   val half = length / 2          // scl / mcl in Pine
   val offset = half / 2          // scl_2 / mcl_2 in Pine
   val src = closePrice
-  val rma = src.modifiedMovingAverage(half)
-  val atr = averageTrueRange(half)
+  val rma = src.modifiedMovingAverage(half).cached(this)
+  val atr = averageTrueRange(half).cached(this)
   val top = Indicator { i -> rma[i + offset] + multiplier * atr[i] }
   val bottom = Indicator { i -> rma[i + offset] - multiplier * atr[i] }
   val median = Indicator { i -> (top[i] + bottom[i]) / 2 }
