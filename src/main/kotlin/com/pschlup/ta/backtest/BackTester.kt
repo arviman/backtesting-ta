@@ -15,6 +15,7 @@ object BackTester {
     val timeSeriesManager = TimeSeriesManager(inputTimeFrame)
     val strategy = spec.strategyFactory.buildStrategy(timeSeriesManager)
     val stopLoss = spec.stopLoss.buildIndicator(timeSeriesManager)
+    val entryAtr = spec.entryAtrFactory?.invoke(timeSeriesManager)
     val runTimeSeries = timeSeriesManager.getTimeSeries(spec.runTimeFrame)
     val tradeHistory = TradeHistory(
       balance = spec.startingBalance,
@@ -54,7 +55,7 @@ object BackTester {
         ) {
           val ladder = spec.entryLadder
           if (ladder != null) {
-            openLadderEntry(spec, tradeHistory, ladder, currentPrice, inputBar.closeTime)
+            openLadderEntry(spec, tradeHistory, ladder, currentPrice, inputBar.closeTime, entryAtr?.latestValue)
           } else {
             openSingleEntry(spec, tradeHistory, stopLoss.latestValue, currentPrice, inputBar.closeTime)
           }
@@ -107,20 +108,32 @@ object BackTester {
     ladder: List<TpSlTier>,
     currentPrice: Double,
     closeTime: Instant,
+    atrAtEntry: Double?,
   ) {
-    // Effective risk per unit = Σ tier.qty × tier.slPct (fraction of entry price).
-    val effectiveRiskPct = ladder.sumOf { it.quantityFraction * it.stopLossPct }
+    // Resolve each tier's SL and TP distances in price-fraction units.
+    val resolved = ladder.map { tier ->
+      val slDistFrac = tier.stopLossAtrMultiplier?.let {
+        val atr = requireNotNull(atrAtEntry) { "entryAtrFactory required for ATR-based SL" }
+        (it * atr) / currentPrice
+      } ?: tier.stopLossPct!!
+      val tpDistFrac = tier.takeProfitAtrMultiplier?.let {
+        val atr = requireNotNull(atrAtEntry) { "entryAtrFactory required for ATR-based TP" }
+        (it * atr) / currentPrice
+      } ?: tier.takeProfitPct!!
+      Triple(tier, slDistFrac, tpDistFrac)
+    }
+    val effectiveRiskPct = resolved.sumOf { (tier, slFrac, _) -> tier.quantityFraction * slFrac }
     if (effectiveRiskPct <= 0) return
     val maxBalanceRisk = tradeHistory.balance * spec.betSize
     var totalAmount = maxBalanceRisk / (currentPrice * effectiveRiskPct)
     val maxAffordable = tradeHistory.balance / currentPrice
     if (totalAmount > maxAffordable) totalAmount = maxAffordable
     val long = spec.tradeType == LONG
-    for (tier in ladder) {
+    for ((tier, slFrac, tpFrac) in resolved) {
       val tierAmount = totalAmount * tier.quantityFraction
       if (tierAmount <= 0) continue
-      val slPrice = if (long) currentPrice * (1 - tier.stopLossPct) else currentPrice * (1 + tier.stopLossPct)
-      val tpPrice = if (long) currentPrice * (1 + tier.takeProfitPct) else currentPrice * (1 - tier.takeProfitPct)
+      val slPrice = if (long) currentPrice * (1 - slFrac) else currentPrice * (1 + slFrac)
+      val tpPrice = if (long) currentPrice * (1 + tpFrac) else currentPrice * (1 - tpFrac)
       tradeHistory += TradeRecord(
         type = spec.tradeType,
         timestamp = closeTime,

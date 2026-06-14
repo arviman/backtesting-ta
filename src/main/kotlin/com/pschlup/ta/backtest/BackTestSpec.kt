@@ -13,17 +13,34 @@ import com.pschlup.ta.timeseries.TimeSeriesManager
  * trailing stop. Tiers close independently as price hits each level.
  *
  * Quantity fractions across tiers must sum to 1.0.
+ *
+ * SL and TP each accept either a fixed fraction of entry price OR a multiplier
+ * applied to ATR-at-entry. The ATR form requires [BackTestSpec.entryAtrFactory].
+ * Exactly one form must be provided for each of SL and TP.
  */
 data class TpSlTier(
-  /** Stop-loss distance as fraction of entry price (LONG: entry × (1 − slPct)). */
-  val stopLossPct: Double,
-  /** Take-profit distance as fraction of entry price (LONG: entry × (1 + tpPct)). */
-  val takeProfitPct: Double,
   /** Share of the total position assigned to this tier. */
   val quantityFraction: Double,
+  /** Stop-loss distance as fraction of entry price (LONG: entry × (1 − slPct)). */
+  val stopLossPct: Double? = null,
+  /** Stop-loss distance as N × ATR-at-entry below/above entry price. */
+  val stopLossAtrMultiplier: Double? = null,
+  /** Take-profit distance as fraction of entry price (LONG: entry × (1 + tpPct)). */
+  val takeProfitPct: Double? = null,
+  /** Take-profit distance as N × ATR-at-entry above/below entry price. */
+  val takeProfitAtrMultiplier: Double? = null,
   /** Optional % trailing stop (e.g. 0.05 = 5% behind current price). */
   val trailingStopPct: Double? = null,
-)
+) {
+  init {
+    require((stopLossPct == null) != (stopLossAtrMultiplier == null)) {
+      "Tier needs exactly one of stopLossPct or stopLossAtrMultiplier"
+    }
+    require((takeProfitPct == null) != (takeProfitAtrMultiplier == null)) {
+      "Tier needs exactly one of takeProfitPct or takeProfitAtrMultiplier"
+    }
+  }
+}
 
 /** Specifies the configuration for a back test run.  */
 data class BackTestSpec(
@@ -54,6 +71,12 @@ data class BackTestSpec(
    * raised to N × desired pyramids (one ladder occupies N active trades).
    */
   val entryLadder: List<TpSlTier>? = null,
+  /**
+   * Indicator providing ATR-at-entry for tiers configured with
+   * [TpSlTier.stopLossAtrMultiplier] or [TpSlTier.takeProfitAtrMultiplier].
+   * Read at entry time only.
+   */
+  val entryAtrFactory: ((TimeSeriesManager) -> Indicator)? = null,
 )
 
 fun interface StopLossFactory {
