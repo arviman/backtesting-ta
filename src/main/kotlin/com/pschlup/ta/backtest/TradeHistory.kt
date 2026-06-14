@@ -45,6 +45,19 @@ internal class TradeHistory(
       }
   }
 
+  fun closeTakeProfitTrades(currentPrice: Double) {
+    activeTrades
+      .filter { it.shouldTakeProfit(currentPrice) }
+      .forEach { trade ->
+        trade.takeProfit(currentPrice)
+        balance += trade.amount * currentPrice * (1.0 - feePerTrade)
+      }
+  }
+
+  fun trailPctStops(currentPrice: Double) {
+    activeTrades.forEach { it.updateTrailingPctStop(currentPrice) }
+  }
+
   fun updateEquity(currentPrice: Double) {
     val equity = balance + getCurrentInvestedValue(currentPrice)
     if (equity > maxEquity) {

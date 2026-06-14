@@ -1,9 +1,11 @@
 package com.pschlup.ta.backtest
 
+import com.pschlup.ta.backtest.TradeType.LONG
 import com.pschlup.ta.indicators.latestValue
 import com.pschlup.ta.timeseries.TimeSeriesManager
 import com.pschlup.ta.strategy.SignalType
 import com.pschlup.ta.timeseries.UnstablePeriodException
+import java.time.Instant
 
 object BackTester {
   @JvmStatic
@@ -23,8 +25,12 @@ object BackTester {
       timeSeriesManager += inputBar
       val currentPrice = inputBar.close
 
-      // Closes stopped trades
+      // Ratchet any per-tier % trailing stops before evaluating stop hits.
+      tradeHistory.trailPctStops(currentPrice)
+
+      // Closes stopped trades + take-profit hits
       tradeHistory.closeStoppedTrades(currentPrice)
+      tradeHistory.closeTakeProfitTrades(currentPrice)
 
       // Updates trade history equity, drawdown.
       tradeHistory.updateEquity(currentPrice)
@@ -46,35 +52,19 @@ object BackTester {
           && tradeHistory.activeTradeCount < spec.pyramidingLimit
           && tradeHistory.balance > 0
         ) {
-
-          // Calculates 1R risk value.
-          val stopLossPrice = stopLoss.latestValue
-          val risk = currentPrice - stopLossPrice
-
-          // Computes risk factor. Risks max betSize% of the account on each trade.
-          val maxBalanceRisk = tradeHistory.balance * spec.betSize
-          var amount = maxBalanceRisk / risk
-
-          // Avoids spending more than the available balance.
-          if (amount > tradeHistory.balance / currentPrice) {
-            amount = tradeHistory.balance / currentPrice
+          val ladder = spec.entryLadder
+          if (ladder != null) {
+            openLadderEntry(spec, tradeHistory, ladder, currentPrice, inputBar.closeTime)
+          } else {
+            openSingleEntry(spec, tradeHistory, stopLoss.latestValue, currentPrice, inputBar.closeTime)
           }
-          tradeHistory +=
-            TradeRecord(
-              type = spec.tradeType,
-              timestamp = inputBar.closeTime,
-              entryPrice = currentPrice,
-              amount = amount,
-              stopLossPrice = stopLossPrice,
-              trailingStopDistance = currentPrice - stopLossPrice,
-            )
         }
       } catch (e: UnstablePeriodException) {
         // Ignores trade signals during unstable period.
       }
     }
 
-    // Closes trades that remain open in the end.
+    // Closes trades that remain open in the end. (helpers below)
     val lastPrice: Double = runTimeSeries.latestBar?.close ?: Double.NaN
     tradeHistory.exitActiveTrades(lastPrice)
     val startPrice: Double = runTimeSeries.oldestBar?.open ?: Double.NaN
@@ -86,5 +76,61 @@ object BackTester {
       startPrice = startPrice,
       endPrice = lastPrice,
     )
+  }
+
+  private fun openSingleEntry(
+    spec: BackTestSpec,
+    tradeHistory: TradeHistory,
+    stopLossPrice: Double,
+    currentPrice: Double,
+    closeTime: Instant,
+  ) {
+    val risk = currentPrice - stopLossPrice
+    val maxBalanceRisk = tradeHistory.balance * spec.betSize
+    var amount = maxBalanceRisk / risk
+    if (amount > tradeHistory.balance / currentPrice) {
+      amount = tradeHistory.balance / currentPrice
+    }
+    tradeHistory += TradeRecord(
+      type = spec.tradeType,
+      timestamp = closeTime,
+      entryPrice = currentPrice,
+      amount = amount,
+      stopLossPrice = stopLossPrice,
+      trailingStopDistance = currentPrice - stopLossPrice,
+    )
+  }
+
+  private fun openLadderEntry(
+    spec: BackTestSpec,
+    tradeHistory: TradeHistory,
+    ladder: List<TpSlTier>,
+    currentPrice: Double,
+    closeTime: Instant,
+  ) {
+    // Effective risk per unit = Σ tier.qty × tier.slPct (fraction of entry price).
+    val effectiveRiskPct = ladder.sumOf { it.quantityFraction * it.stopLossPct }
+    if (effectiveRiskPct <= 0) return
+    val maxBalanceRisk = tradeHistory.balance * spec.betSize
+    var totalAmount = maxBalanceRisk / (currentPrice * effectiveRiskPct)
+    val maxAffordable = tradeHistory.balance / currentPrice
+    if (totalAmount > maxAffordable) totalAmount = maxAffordable
+    val long = spec.tradeType == LONG
+    for (tier in ladder) {
+      val tierAmount = totalAmount * tier.quantityFraction
+      if (tierAmount <= 0) continue
+      val slPrice = if (long) currentPrice * (1 - tier.stopLossPct) else currentPrice * (1 + tier.stopLossPct)
+      val tpPrice = if (long) currentPrice * (1 + tier.takeProfitPct) else currentPrice * (1 - tier.takeProfitPct)
+      tradeHistory += TradeRecord(
+        type = spec.tradeType,
+        timestamp = closeTime,
+        entryPrice = currentPrice,
+        amount = tierAmount,
+        stopLossPrice = slPrice,
+        takeProfitPrice = tpPrice,
+        trailingStopPct = tier.trailingStopPct,
+        trailingStopDistance = if (long) currentPrice - slPrice else slPrice - currentPrice,
+      )
+    }
   }
 }
