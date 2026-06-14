@@ -10,72 +10,93 @@ import com.pschlup.ta.timeseries.TimeFrame
 import com.pschlup.ta.timeseries.TimeSeriesManager
 import com.pschlup.ta.timeseries.readCsvBars
 
-/** A sample back tester and strategy implementation. */
+/** Back tests the JAMA_HCC strategy (long-only port). */
 object BackTestDemo {
   @JvmStatic
   fun main(args: Array<String>) {
 
-    // Sets up the backtest settings.
     val spec = BackTestSpec(
       tradeType = TradeType.LONG,
-      // Defines the timeframe the strategy will run on. In this case the strategy will be evaluated every 1 hour,
-      // even though the input data consists of 5-minute bars.
       runTimeFrame = TimeFrame.H1,
-      // Whether to move the stop loss as the price moves up.
       trailingStops = false,
-      // The limit of simultaneous trades.
-      pyramidingLimit = 2,
-      // Starting account balance, in counter currency units. E.g. USD for a BTC/USD pair.
-      startingBalance = 20000.0,
-      // Risks 2% of the account in each trade.
+      pyramidingLimit = 1,
+      // Matches JAMA's initial_capital=5000 and commission_value=0.05%.
+      startingBalance = 5_000.0,
       betSize = 0.02,
-      // The % fee charged by the exchange in each trade. E.g. Binance charges 0.1% per trade.
-      feePerTrade = 0.001,
-      // Defines the historical data to run the backtest over.
+      feePerTrade = 0.0005,
       inputBars = readCsvBars("sampledata/chart_data_BTC_USDT_p5_730d.csv"),
-      // Defines the factory method that builds the trading strategy when needed.
-      strategyFactory = { seriesManager ->
-        makeStrategy(seriesManager)
-      },
-      // Defines the factory method that builds the stop-loss price indicator.
-      stopLoss = { timeSeries ->
-        timeSeries.h4.volatilityStop(length = 4, multiplier = 0.2)
-      }
+      strategyFactory = { sm -> makeJamaHccStrategy(sm) },
+      stopLoss = { sm -> sm.h4.volatilityStop(length = 4, multiplier = 0.2) }
     )
 
-    // Runs the backtest over the whole test dataset.
     val report = BackTester.run(spec)
-
-    // Prints out the report
     printReport(report)
   }
 
-  private fun makeStrategy(seriesManager: TimeSeriesManager): Strategy {
+  /**
+   * JAMA_HCC strategy port — long-only.
+   *
+   * Entry = jarvis (smoothed-RSI delta over threshold) OR price>ZEMA>SMA crossover.
+   * Trend gate = Hurst Cycle Channel breakout + Mayer Multiple cap + HTF SMA50
+   *              rising + SMA50 slope + medium-Hurst median slope.
+   * Exit  = smoothed-RSI delta falls under (threshold − close-delta).
+   *
+   * Skipped (ponytail) — not modeled by this backtest framework or not
+   * load-bearing for a long-only run:
+   *   - mode switching (bull/bear/dynamic), preset/risk inputs
+   *   - baseline HODL position, moon phase, fib regression bands
+   *   - multi-tier TP/SL, pyramiding, trailing-stop %
+   *   - Heikin-Ashi exit (defaults to off for non-eth preset anyway)
+   *   - Gauss 4-pole filter (McTrend slope gate covers regime detection)
+   * Add when measurably falls short.
+   */
+  private fun makeJamaHccStrategy(sm: TimeSeriesManager): Strategy {
+    val h1 = sm.h1          // strategy timeframe
+    val h4 = sm.h4          // HTF context (~12h in Pine `mayerMultiple_timeFrame`)
 
-    // The timeframes our indicators will use.
-    val h1 = seriesManager.h1 // 1 hour
-    val h4 = seriesManager.h4 // 4 hours
+    val h1Close = h1.closePrice
+    val h4Close = h4.closePrice
 
-    // Creates the 1-hour indicators.
-    val h1price = h1.closePrice
-    val h1cci = h1.cci(10)
-    val h1ema4 = h1price.ema(4)
-    val h1sma20 = h1price.sma(20)
-    val h1ema30 = h1price.ema(30)
+    // --- jarvis entry: smoothed-RSI delta ------------------------------------
+    val rsi = h1Close.rsi(18)
+    val changeEma = rsi.ema(3).ema(12).change()
+    val longThreshold = 0.06
+    val closeDelta = 0.02
+    val jarvisLong = changeEma isOver longThreshold
 
-    // Creates the 4-hour indicators.
-    val h4price: Indicator = h4.closePrice
-    val h4ema4: Indicator = h4price.ema(4)
-    val h4ema8: Indicator = h4price.ema(8)
-    val h4ema15: Indicator = h4price.ema(15)
+    // --- MA entry: close > ZEMA(5) > SMA(21) ---------------------------------
+    val zema5 = h1Close.zema(5)
+    val sma21 = h1Close.sma(21)
+    val maLong = (h1Close isOver zema5) and (zema5 isOver sma21)
+
+    val longEntry = jarvisLong or maLong
+    val longExit = changeEma isUnder (longThreshold - closeDelta)
+
+    // --- Hurst Cycle Channel: enter long only when breaking out top of cycles
+    val shortCh = h1.hurstChannel(length = 10, multiplier = 1.0)
+    val medCh = h1.hurstChannel(length = 30, multiplier = 3.0)
+    val topShort = Indicator { i -> shortCh.bottom[i] + 0.70 * (shortCh.top[i] - shortCh.bottom[i]) }
+    val topMed = Indicator { i -> medCh.bottom[i] + 0.60 * (medCh.top[i] - medCh.bottom[i]) }
+    val hurstLongOk = (h1Close isOver topShort) and (h1Close isOver topMed)
+
+    // --- Mayer Multiple cap + rising HTF SMA50 -------------------------------
+    val sma200Htf = h4Close.sma(200)
+    val sma50Htf = h4Close.sma(50)
+    val mmFilter = Signal { i -> h4Close[i] / sma200Htf[i] < 2.4 }
+    val sma50Rising = Signal { i -> sma50Htf[i] > sma50Htf[i + 1] }
+
+    // --- McTrend: SMA50 slope > 1.5° and medium-Hurst median slope > 1° ------
+    val sma50Angle = h4.angle(sma50Htf)
+    val medMedianAngle = h1.angle(medCh.median)
+    val sma50Trend = Signal { i -> sma50Angle[i] > 1.5 }
+    val medHurstTrend = Signal { i -> medMedianAngle[i] > 1.0 }
+
+    val trend = hurstLongOk and mmFilter and sma50Rising and sma50Trend and medHurstTrend
 
     return Strategy(
-      // Identifies if the market is trending upwards (optional)
-      trendSignal = (h4ema4 isOver h4ema8) and (h4ema8 isOver h4ema15) and (h1ema4 isOver h1ema30),
-      // Identifies when to enter a trade. This is ignored if the trend signal is not positive.
-      entrySignal = h1cci crossedOver +100.0,
-      // Identifies when to exit active trades.
-      exitSignal = h1ema4 crossedUnder h1sma20,
+      trendSignal = trend,
+      entrySignal = longEntry,
+      exitSignal = longExit,
     )
   }
 
