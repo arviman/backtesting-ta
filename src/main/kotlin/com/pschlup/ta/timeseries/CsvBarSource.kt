@@ -59,10 +59,10 @@ fun readCsvBars(reader: Reader): List<Bar> =
         Bar(
           timeFrame = timeFrame,
           openTime = parseDateTime(row[cols.date]),
-          open = row[cols.open].toDouble(),
-          high = row[cols.high].toDouble(),
-          low = row[cols.low].toDouble(),
-          close = row[cols.close].toDouble(),
+          open = parsePrice(row[cols.open]),
+          high = parsePrice(row[cols.high]),
+          low = parsePrice(row[cols.low]),
+          close = parsePrice(row[cols.close]),
           volume = parseVolume(row[cols.volume]),
         )
       }
@@ -121,8 +121,15 @@ private fun parseDateTime(value: String): Instant {
   }
 }
 
+/** Parses a price/numeric field that may carry quotes and comma thousands separators. */
+private fun parsePrice(value: String): Double {
+  val cleaned = value.trim().replace("\"", "").replace(",", "")
+  return if (cleaned.isEmpty()) 0.0 else cleaned.toDouble()
+}
+
 private fun parseVolume(value: String): Double {
   val cleaned = value.trim().replace("\"", "").replace(",", "")
+  if (cleaned.isEmpty()) return 0.0
   val multiplier = when {
     cleaned.endsWith("B", ignoreCase = true) -> 1_000_000_000.0
     cleaned.endsWith("M", ignoreCase = true) -> 1_000_000.0
