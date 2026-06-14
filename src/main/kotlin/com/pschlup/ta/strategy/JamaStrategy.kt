@@ -56,6 +56,14 @@ data class JamaParams(
    */
   val earlyEntry: Boolean = false,
   /**
+   * Drops all trend gates entirely — entries fire whenever the entry signal
+   * (jarvis OR MA cross) triggers, regardless of MM, SMA50 direction, or
+   * Hurst position. Use with a lower [changeEmaThreshold] (e.g. 0.03) to
+   * test whether daily-timeframe entries are too slow because of gating.
+   * Takes precedence over [earlyEntry].
+   */
+  val dropTrendGates: Boolean = false,
+  /**
    * When true, the smoothed-RSI rollover exit signal is suppressed. Trades
    * close only on TP, SL, or end-of-data. Use this to test whether the
    * targeted R:R actually plays out without the soft exit chopping winners.
@@ -111,10 +119,10 @@ fun makeJamaHccStrategy(
   val sma50Trend = Signal { i -> sma50Angle[i] > params.sma50SlopeDeg }
   val medHurstTrend = Signal { i -> medMedianAngle[i] > params.mediumHurstSlopeDeg }
 
-  val trend = if (params.earlyEntry) {
-    mmFilter and sma50Rising
-  } else {
-    hurstLongOk and mmFilter and sma50Rising and sma50Trend and medHurstTrend
+  val trend: Signal = when {
+    params.dropTrendGates -> Signal { true }
+    params.earlyEntry -> mmFilter and sma50Rising
+    else -> hurstLongOk and mmFilter and sma50Rising and sma50Trend and medHurstTrend
   }
 
   return Strategy(

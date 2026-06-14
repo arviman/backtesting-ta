@@ -30,8 +30,15 @@ object MultiAssetSoftExitTest {
 
   private data class Variant(val label: String, val params: JamaParams)
   private val variants = listOf(
-    Variant("JAMA late ", JamaParams(earlyEntry = false, disableSoftExit = false, trailingStopPct = null)),
-    Variant("JAMA early", JamaParams(earlyEntry = true,  disableSoftExit = false, trailingStopPct = null)),
+    Variant("JAMA late   ", JamaParams(earlyEntry = false, disableSoftExit = false, trailingStopPct = null)),
+    Variant("JAMA early  ", JamaParams(earlyEntry = true,  disableSoftExit = false, trailingStopPct = null)),
+    Variant("JAMA relaxed", JamaParams(
+      earlyEntry = true,
+      dropTrendGates = true,
+      changeEmaThreshold = 0.03, // lower bar for jarvis entry
+      disableSoftExit = false,
+      trailingStopPct = null,
+    )),
   )
 
   // Effectively no SL / no TP. 99% SL = stop at 1% of entry; 10000% TP = up
@@ -105,14 +112,14 @@ object MultiAssetSoftExitTest {
   }
 
   private fun header(): String =
-    "%-12s | %4s %7s %7s %7s %7s | %4s %7s %7s %7s %7s".format(
+    "%-14s | %4s %7s %7s %7s %7s | %4s %7s %7s %7s %7s".format(
       "variant",
       "IS#t", "IS w%", "IS R:R", "IS E[R]", "IS prf",
       "OS#t", "OS w%", "OS R:R", "OS E[R]", "OS prf",
     )
 
   private fun row(label: String, ins: BackTestReport, os: BackTestReport): String =
-    "%-12s | %4d %7s %7s %7s %7s | %4d %7s %7s %7s %7s".format(
+    "%-14s | %4d %7s %7s %7s %7s | %4d %7s %7s %7s %7s".format(
       label,
       ins.tradeCount, pct(ins.winRate), fmt(ins.avgRewardRiskRatio), pct(ins.expectedValuePerTrade), pct(ins.profitability),
       os.tradeCount, pct(os.winRate), fmt(os.avgRewardRiskRatio), pct(os.expectedValuePerTrade), pct(os.profitability),
