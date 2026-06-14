@@ -55,6 +55,12 @@ data class JamaParams(
    * "SMA50 rising" check. Trades more often, takes less confirmation.
    */
   val earlyEntry: Boolean = false,
+  /**
+   * When true, the smoothed-RSI rollover exit signal is suppressed. Trades
+   * close only on TP, SL, or end-of-data. Use this to test whether the
+   * targeted R:R actually plays out without the soft exit chopping winners.
+   */
+  val disableSoftExit: Boolean = false,
 )
 
 /**
@@ -83,7 +89,8 @@ fun makeJamaHccStrategy(
   val maLong = (sClose isOver zema5) and (zema5 isOver sma21)
 
   val longEntry = jarvisLong or maLong
-  val longExit = changeEma isUnder (params.changeEmaThreshold - params.closeDelta)
+  val longExit: Signal = if (params.disableSoftExit) Signal { false }
+                        else changeEma isUnder (params.changeEmaThreshold - params.closeDelta)
 
   // --- Hurst Cycle Channel: enter long only when breaking out top of cycles
   val shortCh = strategy.hurstChannel(length = 10, multiplier = 1.0)

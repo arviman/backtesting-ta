@@ -32,7 +32,13 @@ object ParameterSweep {
 
   private fun grid(): List<JamaParams> = earlyEntryValues.flatMap { early ->
     tpSlRatioValues.map { r ->
-      JamaParams(slAtrMult = 2.0, tpSlRatio = r, earlyEntry = early, trailingStopPct = null)
+      JamaParams(
+        slAtrMult = 2.0,
+        tpSlRatio = r,
+        earlyEntry = early,
+        trailingStopPct = null,
+        disableSoftExit = true,
+      )
     }
   }
 
