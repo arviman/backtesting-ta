@@ -24,7 +24,7 @@ object BackTestDemo {
       startingBalance = 5_000.0,
       betSize = 0.02,
       feePerTrade = 0.0005,
-      inputBars = readCsvBars("sampledata/chart_data_BTC_USDT_p5_90d.csv"),
+      inputBars = readCsvBars("sampledata/chart_data_BTC_USDT_p5_730d.csv"),
       strategyFactory = { sm -> makeJamaHccStrategy(sm) },
       stopLoss = { sm -> sm.h4.volatilityStop(length = 4, multiplier = 0.2) }
     )

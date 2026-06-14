@@ -8,17 +8,29 @@ import kotlin.math.PI
 import kotlin.math.atan
 
 /**
- * Per-bar memoizing wrapper. Cache is keyed by index and invalidated when the
- * series' latest bar identity changes. Required to make chained recursive
- * indicators (e.g. `ema(ema(rsi))`) finish in reasonable time.
+ * Per-bar memoizing wrapper with a shifting window.
+ *
+ * Cache is keyed by reverse-chronological index (`[0]` = latest). When a new
+ * bar arrives, every index slides by +1 (old `[0]` is now `[1]`, etc.), so we
+ * rebuild the map with shifted keys rather than clearing — only the fresh
+ * `[0]` needs (re)computing. Bounded by [windowSize] so it can't grow forever.
+ *
+ * Required to make chained recursive indicators (`ema(ema(rsi))`) tractable.
  */
-fun Indicator.cached(series: TimeSeries): Indicator {
-  val cache = HashMap<Int, Double>()
+fun Indicator.cached(series: TimeSeries, windowSize: Int = 256): Indicator {
+  var cache = HashMap<Int, Double>()
   var lastBar: Bar? = null
   return Indicator { i ->
     val current = series.latestBar
     if (current !== lastBar) {
-      cache.clear()
+      if (lastBar != null && cache.isNotEmpty()) {
+        val shifted = HashMap<Int, Double>(cache.size * 2)
+        for ((k, v) in cache) {
+          val nk = k + 1
+          if (nk < windowSize) shifted[nk] = v
+        }
+        cache = shifted
+      }
       lastBar = current
     }
     cache.getOrPut(i) { this.valueAt(i) }
