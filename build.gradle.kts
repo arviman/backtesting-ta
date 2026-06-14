@@ -11,7 +11,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("com.pschlup.ta.GoldComparison")
+    mainClass.set("com.pschlup.ta.MultiAssetSoftExitTest")
 }
 
 repositories {
