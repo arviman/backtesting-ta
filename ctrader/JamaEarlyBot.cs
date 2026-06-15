@@ -1,22 +1,28 @@
 // JamaEarlyBot — cTrader Algo C# cBot.
 //
-// Port of the JAMA early-entry strategy from this repository
-// (src/main/kotlin/com/pschlup/ta/strategy/JamaStrategy.kt) at the config
-// that came out on top of the Gold-daily SL sweep:
+// Port of the JAMA early-entry strategy from
+// src/main/kotlin/com/pschlup/ta/strategy/JamaStrategy.kt. Defaults reflect
+// H8 XAUUSD optimization winner (changeEmaThreshold=0.08, closeDelta=0.04,
+// TP:SL=5.5, JarvisOnly entry mode).
 //
 //   slAtrMult        = 5.0                  // SL = entry − 5 × ATR(14)
-//   tpSlRatio        = 3.0                  // TP = entry + 3 × (SL distance)
-//   earlyEntry       = true                 // drops Hurst breakout + slope gates
-//   dropTrendGates   = false                // keeps MM cap + SMA50-rising gates
-//   changeEmaThreshold = 0.06
-//   closeDelta       = 0.02                 // soft exit at threshold − delta
+//   tpSlRatio        = 5.5                  // TP = 5.5 × SL distance
+//   earlyEntry       = true                 // (built in: MM cap is the only trend gate)
+//   changeEmaThreshold = 0.08
+//   closeDelta       = 0.04                 // soft exit at threshold − delta
 //   disableSoftExit  = false                // soft exit (smoothed-RSI rollover) ON
 //   pyramiding       = 1                    // single open position at a time
-//   volume           = 0.1 lot
+//   volume           = 0.05 lot
+//
+// Optimizer-friendly parameters: entry mode is a 3-way enum
+// (JarvisOnly / MaCrossOnly / Both) so "neither enabled" is unrepresentable;
+// MA-cross memory window is a 4-value enum (Small/Medium/Large/Forever ->
+// 5/10/20/50 bars). SMA50-rising gate was dropped after H8 sweep showed top
+// performers don't use it.
 //
 // Recommended environment:
 //   Symbol     : XAUUSD
-//   Timeframe  : Daily
+//   Timeframe  : H8 / Daily / H12
 //   Account    : $100K prop or personal, ~$5K/$10K DD ceilings
 //
 // Indexing note: cTrader's DataSeries uses index 0 = OLDEST, Count−1 = LATEST.
@@ -30,6 +36,21 @@ using cAlgo.API.Internals;
 
 namespace cAlgo.Robots
 {
+    public enum EntryMode
+    {
+        JarvisOnly,     // smoothed-RSI delta only
+        MaCrossOnly,    // close > zema5 > sma21 only
+        Both,           // jarvis OR (MA-cross gated by jarvis memory)
+    }
+
+    public enum MemoryWindow
+    {
+        Small,          // 5 bars
+        Medium,         // 10 bars
+        Large,          // 20 bars
+        Forever,        // 50 bars (effectively legacy OR)
+    }
+
     [Robot(AccessRights = AccessRights.None)]
     public class JamaEarlyBot : Robot
     {
@@ -44,30 +65,25 @@ namespace cAlgo.Robots
         [Parameter("SL × ATR(14)", DefaultValue = 5.0, MinValue = 1.0, Step = 0.5, Group = "Risk")]
         public double SlAtrMult { get; set; }
 
-        [Parameter("TP : SL ratio", DefaultValue = 3.0, MinValue = 0.5, Step = 0.5, Group = "Risk")]
+        [Parameter("TP : SL ratio", DefaultValue = 5.5, MinValue = 0.5, Step = 0.5, Group = "Risk")]
         public double TpSlRatio { get; set; }
 
-        // ────── Trend gates (earlyEntry mode) ──────
+        // ────── Trend gate ──────
         [Parameter("Mayer Multiple cap", DefaultValue = 2.4, MinValue = 1.0, Step = 0.1, Group = "Trend")]
         public double MmCap { get; set; }
 
-        // ────── Entry (jarvis + MA-cross) ──────
-        [Parameter("changeEma threshold", DefaultValue = 0.06, MinValue = 0.0, Step = 0.01, Group = "Entry")]
+        // ────── Entry ──────
+        [Parameter("Entry mode", DefaultValue = EntryMode.JarvisOnly, Group = "Entry")]
+        public EntryMode Mode { get; set; }
+
+        [Parameter("changeEma threshold", DefaultValue = 0.08, MinValue = 0.0, Step = 0.01, Group = "Entry")]
         public double ChangeEmaThreshold { get; set; }
 
-        [Parameter("Use jarvis entry", DefaultValue = true, Group = "Entry")]
-        public bool UseJarvis { get; set; }
+        [Parameter("MA-cross memory window", DefaultValue = MemoryWindow.Medium, Group = "Entry")]
+        public MemoryWindow JarvisMemory { get; set; }
 
-        [Parameter("Use MA-cross entry", DefaultValue = true, Group = "Entry")]
-        public bool UseMaCross { get; set; }
-
-        [Parameter("MA-cross valid for N bars after jarvis", DefaultValue = 20, MinValue = 1, MaxValue = 200, Group = "Entry")]
-        public int JarvisMemoryBars { get; set; }
-
-        [Parameter("Use SMA50-rising gate", DefaultValue = true, Group = "Entry")]
-        public bool UseSma50RisingGate { get; set; }
-
-        [Parameter("changeEma close-delta", DefaultValue = 0.02, MinValue = 0.0, Step = 0.01, Group = "Exit")]
+        // ────── Exit ──────
+        [Parameter("changeEma close-delta", DefaultValue = 0.04, MinValue = 0.0, Step = 0.01, Group = "Exit")]
         public double CloseDelta { get; set; }
 
         // ────── Indicators ──────
@@ -75,7 +91,6 @@ namespace cAlgo.Robots
         private ExponentialMovingAverage _rsiSm1;    // EMA(rsi, 3)
         private ExponentialMovingAverage _rsiSm2;    // EMA(rsiSm1, 12)
         private SimpleMovingAverage _sma21;
-        private SimpleMovingAverage _sma50;
         private SimpleMovingAverage _sma200;
         private AverageTrueRange _atr;
 
@@ -96,7 +111,6 @@ namespace cAlgo.Robots
             _rsiSm2 = Indicators.ExponentialMovingAverage(_rsiSm1.Result, 12);
 
             _sma21 = Indicators.SimpleMovingAverage(Bars.ClosePrices, 21);
-            _sma50 = Indicators.SimpleMovingAverage(Bars.ClosePrices, 50);
             _sma200 = Indicators.SimpleMovingAverage(Bars.ClosePrices, 200);
             _atr = Indicators.AverageTrueRange(14, MovingAverageType.Simple);
 
@@ -116,31 +130,41 @@ namespace cAlgo.Robots
             double changeEma = rsiSm2 - rsiSm2Prev;
 
             double sma21 = _sma21.Result.Last(1);
-            double sma50 = _sma50.Result.Last(1);
-            double sma50Prev = _sma50.Result.Last(2);
             double sma200 = _sma200.Result.Last(1);
             double atr = _atr.Result.Last(1);
 
             // ZEMA(close, 5) computed inline (cTrader has no built-in ZEMA).
             double zema5 = ComputeZema(closedOffset: 1, length: 5);
 
-            // --- Entry signals ---
-            bool jarvisLong = UseJarvis && changeEma > ChangeEmaThreshold;
-            bool maLongRaw = UseMaCross && close > zema5 && zema5 > sma21;
+            // --- Entry signals (gated by Mode) ---
+            bool jarvisRaw = changeEma > ChangeEmaThreshold;
+            bool maRaw = close > zema5 && zema5 > sma21;
 
-            // Track jarvis recency. MA-cross only counts as continuation while
-            // jarvis fired within the memory window — otherwise it's just price
-            // drifting above short MAs in a flat phase and should not enter.
-            if (jarvisLong) _barsSinceJarvis = 0;
+            // Track jarvis recency (always — cheap, used by Both mode).
+            if (jarvisRaw) _barsSinceJarvis = 0;
             else if (_barsSinceJarvis < int.MaxValue) _barsSinceJarvis++;
 
-            bool maContinuation = maLongRaw && _barsSinceJarvis <= JarvisMemoryBars;
-            bool longEntry = jarvisLong || maContinuation;
+            bool longEntry;
+            switch (Mode)
+            {
+                case EntryMode.JarvisOnly:
+                    longEntry = jarvisRaw;
+                    break;
+                case EntryMode.MaCrossOnly:
+                    longEntry = maRaw;
+                    break;
+                case EntryMode.Both:
+                default:
+                    // MA-cross only counts as continuation while jarvis fired
+                    // within the memory window — flat-phase drifts above the
+                    // short MAs without recent momentum do not enter.
+                    bool maContinuation = maRaw && _barsSinceJarvis <= MemoryBars();
+                    longEntry = jarvisRaw || maContinuation;
+                    break;
+            }
 
-            // --- Trend gate (earlyEntry mode) ---
-            bool mmFilter = close / sma200 < MmCap;
-            bool sma50Rising = !UseSma50RisingGate || sma50 > sma50Prev;
-            bool trendOk = mmFilter && sma50Rising;
+            // --- Trend gate ---
+            bool trendOk = (close / sma200) < MmCap;
 
             // --- Exit signal (soft exit: smoothed-RSI rollover) ---
             bool longExit = changeEma < (ChangeEmaThreshold - CloseDelta);
@@ -219,6 +243,20 @@ namespace cAlgo.Robots
             double c = Bars.ClosePrices[i];
             double cLag = i - lag >= 0 ? Bars.ClosePrices[i - lag] : c;
             return 2 * c - cLag;
+        }
+
+        // Discrete memory window — friendlier to cTrader's optimizer than a
+        // free integer. Forever (50) is effectively legacy OR for MA-cross.
+        private int MemoryBars()
+        {
+            switch (JarvisMemory)
+            {
+                case MemoryWindow.Small: return 5;
+                case MemoryWindow.Medium: return 10;
+                case MemoryWindow.Large: return 20;
+                case MemoryWindow.Forever: return 50;
+                default: return 10;
+            }
         }
 
         protected override void OnStop()
