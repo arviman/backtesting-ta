@@ -11,7 +11,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("com.pschlup.ta.ParameterSweep")
+    mainClass.set("com.pschlup.ta.BollingerMeanReversionTest")
 }
 
 repositories {
