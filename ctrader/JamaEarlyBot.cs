@@ -58,6 +58,13 @@ namespace cAlgo.Robots
         [Parameter("changeEma close-delta", DefaultValue = 0.02, MinValue = 0.0, Step = 0.01, Group = "Exit")]
         public double CloseDelta { get; set; }
 
+        // ────── Diagnostics ──────
+        [Parameter("Diagnostic logging", DefaultValue = true, Group = "Diagnostics")]
+        public bool Diagnostic { get; set; }
+
+        [Parameter("Diagnostic print every N bars", DefaultValue = 50, MinValue = 1, Group = "Diagnostics")]
+        public int DiagnosticEveryNBars { get; set; }
+
         // ────── Indicators ──────
         private RelativeStrengthIndex _rsi;          // RSI(close, 18)
         private ExponentialMovingAverage _rsiSm1;    // EMA(rsi, 3)
@@ -90,7 +97,12 @@ namespace cAlgo.Robots
         protected override void OnBar()
         {
             // Need enough warmup for the slowest indicator (SMA200).
-            if (Bars.Count < 200) return;
+            if (Bars.Count < 200)
+            {
+                if (Diagnostic && Bars.Count % 50 == 0)
+                    Print("warmup: bar {0}/200", Bars.Count);
+                return;
+            }
 
             // --- Read values at the last closed bar (Last(1)) ---
             double close = Bars.ClosePrices.Last(1);
@@ -103,6 +115,7 @@ namespace cAlgo.Robots
             double sma50Prev = _sma50.Result.Last(2);
             double sma200 = _sma200.Result.Last(1);
             double atr = _atr.Result.Last(1);
+            double mm = close / sma200;
 
             // ZEMA(close, 5) computed inline (cTrader has no built-in ZEMA).
             double zema5 = ComputeZema(closedOffset: 1, length: 5);
@@ -113,17 +126,37 @@ namespace cAlgo.Robots
             bool longEntry = jarvisLong || maLong;
 
             // --- Trend gate (earlyEntry mode) ---
-            bool mmFilter = close / sma200 < MmCap;
+            bool mmFilter = mm < MmCap;
             bool sma50Rising = sma50 > sma50Prev;
             bool trendOk = mmFilter && sma50Rising;
 
             // --- Exit signal (soft exit: smoothed-RSI rollover) ---
             bool longExit = changeEma < (ChangeEmaThreshold - CloseDelta);
 
+            // --- Diagnostic logging ---
+            if (Diagnostic)
+            {
+                if (Bars.Count % DiagnosticEveryNBars == 0)
+                {
+                    Print("bar {0}: close={1:F2} sma200={2:F2} mm={3:F3} sma50={4:F2}/{5:F2}({6}) " +
+                          "changeEma={7:F4} (thresh {8:F4}) zema5={9:F2} sma21={10:F2} atr={11:F2}",
+                          Bars.Count, close, sma200, mm, sma50, sma50Prev,
+                          sma50Rising ? "rising" : "FLAT/FALLING", changeEma, ChangeEmaThreshold,
+                          zema5, sma21, atr);
+                    Print("  signals: jarvis={0} ma={1} | mm<{2}={3} sma50Rising={4} -> trend={5} | entry={6}",
+                          jarvisLong, maLong, MmCap, mmFilter, sma50Rising, trendOk, longEntry && trendOk);
+                }
+                // Always log a "would-have-entered but blocked" event.
+                if (longEntry && !trendOk)
+                    Print("entry BLOCKED at bar {0}: jarvis={1} ma={2} mm={3:F3}(<{4}?{5}) sma50Rising={6}",
+                          Bars.Count, jarvisLong, maLong, mm, MmCap, mmFilter, sma50Rising);
+            }
+
             // --- Manage existing position on this label/symbol ---
             var open = FindOpenPosition();
             if (open != null && longExit)
             {
+                if (Diagnostic) Print("EXIT at bar {0} close={1:F2} changeEma={2:F4}", Bars.Count, close, changeEma);
                 ClosePosition(open);
                 return; // wait one bar before re-entering
             }
@@ -131,6 +164,8 @@ namespace cAlgo.Robots
             // --- New entry: only when fully gated AND no open position ---
             if (open == null && longEntry && trendOk)
             {
+                if (Diagnostic) Print("ENTRY at bar {0} close={1:F2} atr={2:F2} via {3}",
+                    Bars.Count, close, atr, jarvisLong ? "jarvis" : "MA-cross");
                 OpenLong(atr);
             }
         }
