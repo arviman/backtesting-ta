@@ -61,6 +61,9 @@ namespace cAlgo.Robots
         [Parameter("Use MA-cross entry", DefaultValue = true, Group = "Entry")]
         public bool UseMaCross { get; set; }
 
+        [Parameter("MA-cross valid for N bars after jarvis", DefaultValue = 20, MinValue = 1, MaxValue = 200, Group = "Entry")]
+        public int JarvisMemoryBars { get; set; }
+
         [Parameter("Use SMA50-rising gate", DefaultValue = true, Group = "Entry")]
         public bool UseSma50RisingGate { get; set; }
 
@@ -75,6 +78,11 @@ namespace cAlgo.Robots
         private SimpleMovingAverage _sma50;
         private SimpleMovingAverage _sma200;
         private AverageTrueRange _atr;
+
+        // Tracks how many bars since jarvis last fired. MA-cross is treated as a
+        // continuation signal — only valid while we're still inside that memory
+        // window, so price drifting above short MAs in flat phases doesn't open.
+        private int _barsSinceJarvis = int.MaxValue;
 
         protected override void OnStart()
         {
@@ -118,8 +126,16 @@ namespace cAlgo.Robots
 
             // --- Entry signals ---
             bool jarvisLong = UseJarvis && changeEma > ChangeEmaThreshold;
-            bool maLong = UseMaCross && close > zema5 && zema5 > sma21;
-            bool longEntry = jarvisLong || maLong;
+            bool maLongRaw = UseMaCross && close > zema5 && zema5 > sma21;
+
+            // Track jarvis recency. MA-cross only counts as continuation while
+            // jarvis fired within the memory window — otherwise it's just price
+            // drifting above short MAs in a flat phase and should not enter.
+            if (jarvisLong) _barsSinceJarvis = 0;
+            else if (_barsSinceJarvis < int.MaxValue) _barsSinceJarvis++;
+
+            bool maContinuation = maLongRaw && _barsSinceJarvis <= JarvisMemoryBars;
+            bool longEntry = jarvisLong || maContinuation;
 
             // --- Trend gate (earlyEntry mode) ---
             bool mmFilter = close / sma200 < MmCap;
