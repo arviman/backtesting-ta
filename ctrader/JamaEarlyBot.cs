@@ -69,8 +69,10 @@ namespace cAlgo.Robots
 
         protected override void OnStart()
         {
-            if (TimeFrame != TimeFrame.Daily)
-                Print("WARN: this bot is tuned for Daily timeframe; currently on {0}", TimeFrame);
+            // JAMA was originally tuned for 12-hour crypto bars; the gold backtest
+            // in this repo locked the Daily config. Both are valid — anything
+            // finer than H4 just shrinks ATR and will need parameter retuning.
+            Print("JamaEarlyBot starting on {0}", TimeFrame);
 
             _rsi = Indicators.RelativeStrengthIndex(Bars.ClosePrices, 18);
             _rsiSm1 = Indicators.ExponentialMovingAverage(_rsi.Result, 3);
