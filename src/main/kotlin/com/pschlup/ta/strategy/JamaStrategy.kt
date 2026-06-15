@@ -69,6 +69,18 @@ data class JamaParams(
    * targeted R:R actually plays out without the soft exit chopping winners.
    */
   val disableSoftExit: Boolean = false,
+  /**
+   * When true, replaces the smoothed-RSI rollover exit with an angle-change
+   * exit: trade closes when the MA slope's bar-over-bar change drops below
+   * [exitDecelThreshold] — i.e. trend is decelerating, exhaustion likely.
+   * Exits earlier than waiting for the slope itself to flatten.
+   * Ignored if [disableSoftExit] is true.
+   */
+  val useAngleChangeExit: Boolean = false,
+  /** MA length used for the angle-change exit. */
+  val exitMaLength: Int = 20,
+  /** Angle-change threshold below which the exit fires (default: any deceleration). */
+  val exitDecelThreshold: Double = 0.0,
 )
 
 /**
@@ -97,8 +109,16 @@ fun makeJamaHccStrategy(
   val maLong = (sClose isOver zema5) and (zema5 isOver sma21)
 
   val longEntry = jarvisLong or maLong
-  val longExit: Signal = if (params.disableSoftExit) Signal { false }
-                        else changeEma isUnder (params.changeEmaThreshold - params.closeDelta)
+  val longExit: Signal = when {
+    params.disableSoftExit -> Signal { false }
+    params.useAngleChangeExit -> {
+      val exitMa = sClose.sma(params.exitMaLength).cached(strategy)
+      val exitAngle = strategy.angle(exitMa).cached(strategy)
+      val exitAngleChange = exitAngle.change()
+      exitAngleChange isUnder params.exitDecelThreshold
+    }
+    else -> changeEma isUnder (params.changeEmaThreshold - params.closeDelta)
+  }
 
   // --- Hurst Cycle Channel: enter long only when breaking out top of cycles
   val shortCh = strategy.hurstChannel(length = 10, multiplier = 1.0)

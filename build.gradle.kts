@@ -11,7 +11,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("com.pschlup.ta.AngleMomentumTest")
+    mainClass.set("com.pschlup.ta.JamaAngleExitTest")
 }
 
 repositories {
