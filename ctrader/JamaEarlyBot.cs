@@ -51,9 +51,18 @@ namespace cAlgo.Robots
         [Parameter("Mayer Multiple cap", DefaultValue = 2.4, MinValue = 1.0, Step = 0.1, Group = "Trend")]
         public double MmCap { get; set; }
 
-        // ────── Entry (jarvis) ──────
+        // ────── Entry (jarvis + MA-cross) ──────
         [Parameter("changeEma threshold", DefaultValue = 0.06, MinValue = 0.0, Step = 0.01, Group = "Entry")]
         public double ChangeEmaThreshold { get; set; }
+
+        [Parameter("Use jarvis entry", DefaultValue = true, Group = "Entry")]
+        public bool UseJarvis { get; set; }
+
+        [Parameter("Use MA-cross entry", DefaultValue = true, Group = "Entry")]
+        public bool UseMaCross { get; set; }
+
+        [Parameter("Use SMA50-rising gate", DefaultValue = true, Group = "Entry")]
+        public bool UseSma50RisingGate { get; set; }
 
         [Parameter("changeEma close-delta", DefaultValue = 0.02, MinValue = 0.0, Step = 0.01, Group = "Exit")]
         public double CloseDelta { get; set; }
@@ -108,13 +117,13 @@ namespace cAlgo.Robots
             double zema5 = ComputeZema(closedOffset: 1, length: 5);
 
             // --- Entry signals ---
-            bool jarvisLong = changeEma > ChangeEmaThreshold;
-            bool maLong = close > zema5 && zema5 > sma21;
+            bool jarvisLong = UseJarvis && changeEma > ChangeEmaThreshold;
+            bool maLong = UseMaCross && close > zema5 && zema5 > sma21;
             bool longEntry = jarvisLong || maLong;
 
             // --- Trend gate (earlyEntry mode) ---
             bool mmFilter = close / sma200 < MmCap;
-            bool sma50Rising = sma50 > sma50Prev;
+            bool sma50Rising = !UseSma50RisingGate || sma50 > sma50Prev;
             bool trendOk = mmFilter && sma50Rising;
 
             // --- Exit signal (soft exit: smoothed-RSI rollover) ---
