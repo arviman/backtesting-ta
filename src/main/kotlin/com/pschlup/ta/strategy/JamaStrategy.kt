@@ -81,6 +81,17 @@ data class JamaParams(
   val exitMaLength: Int = 20,
   /** Angle-change threshold below which the exit fires (default: any deceleration). */
   val exitDecelThreshold: Double = 0.0,
+
+  // --- MA-cross-as-continuation gating --------------------------------------
+  /**
+   * When true, the MA-cross entry path (`close > zema5 > sma21`) only counts
+   * as an entry if jarvis fired within the last [jarvisMemoryBars] bars.
+   * Treats MA-cross as a continuation signal — price drifting above the short
+   * MAs during flat phases no longer triggers entries on its own.
+   */
+  val useJarvisMemory: Boolean = false,
+  /** Memory window for jarvis when [useJarvisMemory] is true. */
+  val jarvisMemoryBars: Int = 20,
 )
 
 /**
@@ -108,7 +119,17 @@ fun makeJamaHccStrategy(
   val sma21 = sClose.sma(21).cached(strategy)
   val maLong = (sClose isOver zema5) and (zema5 isOver sma21)
 
-  val longEntry = jarvisLong or maLong
+  val longEntry: Signal = if (params.useJarvisMemory) {
+    // MA-cross gated by recent jarvis. Reverse-chronological indexing means
+    // [i+k] for k>0 is k bars older, so this checks "did jarvis fire on the
+    // current bar or any of the previous N bars".
+    val maContinuation = Signal { i ->
+      maLong[i] && (0..params.jarvisMemoryBars).any { k -> jarvisLong[i + k] }
+    }
+    jarvisLong or maContinuation
+  } else {
+    jarvisLong or maLong
+  }
   val longExit: Signal = when {
     params.disableSoftExit -> Signal { false }
     params.useAngleChangeExit -> {

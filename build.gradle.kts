@@ -11,7 +11,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("com.pschlup.ta.GoldSlSweep")
+    mainClass.set("com.pschlup.ta.JamaMemoryTest")
 }
 
 repositories {
