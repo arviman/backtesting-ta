@@ -11,7 +11,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("com.pschlup.ta.JamaAngleExitTest")
+    mainClass.set("com.pschlup.ta.GoldSlSweep")
 }
 
 repositories {
