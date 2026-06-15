@@ -61,6 +61,9 @@ namespace cAlgo.Robots
         [Parameter("Label", DefaultValue = "JAMA_Early", Group = "Sizing")]
         public string Label { get; set; }
 
+        [Parameter("Long only", DefaultValue = true, Group = "Sizing")]
+        public bool LongOnly { get; set; }
+
         // ────── Risk / exits ──────
         [Parameter("SL × ATR(14)", DefaultValue = 5.0, MinValue = 1.0, Step = 0.5, Group = "Risk")]
         public double SlAtrMult { get; set; }
@@ -94,10 +97,11 @@ namespace cAlgo.Robots
         private SimpleMovingAverage _sma200;
         private AverageTrueRange _atr;
 
-        // Tracks how many bars since jarvis last fired. MA-cross is treated as a
-        // continuation signal — only valid while we're still inside that memory
-        // window, so price drifting above short MAs in flat phases doesn't open.
-        private int _barsSinceJarvis = int.MaxValue;
+        // Per-direction jarvis recency counters. MA-cross only counts as
+        // continuation if the same-direction jarvis fired within the memory
+        // window — a long-side jarvis does not validate a short MA-cross.
+        private int _barsSinceJarvisLong = int.MaxValue;
+        private int _barsSinceJarvisShort = int.MaxValue;
 
         protected override void OnStart()
         {
@@ -136,77 +140,90 @@ namespace cAlgo.Robots
             // ZEMA(close, 5) computed inline (cTrader has no built-in ZEMA).
             double zema5 = ComputeZema(closedOffset: 1, length: 5);
 
-            // --- Entry signals (gated by Mode) ---
-            bool jarvisRaw = changeEma > ChangeEmaThreshold;
-            bool maRaw = close > zema5 && zema5 > sma21;
-
-            // Track jarvis recency (always — cheap, used by Both mode).
-            if (jarvisRaw) _barsSinceJarvis = 0;
-            else if (_barsSinceJarvis < int.MaxValue) _barsSinceJarvis++;
-
-            bool longEntry;
-            switch (Mode)
-            {
-                case EntryMode.JarvisOnly:
-                    longEntry = jarvisRaw;
-                    break;
-                case EntryMode.MaCrossOnly:
-                    longEntry = maRaw;
-                    break;
-                case EntryMode.Both:
-                default:
-                    // MA-cross only counts as continuation while jarvis fired
-                    // within the memory window — flat-phase drifts above the
-                    // short MAs without recent momentum do not enter.
-                    bool maContinuation = maRaw && _barsSinceJarvis <= MemoryBars();
-                    longEntry = jarvisRaw || maContinuation;
-                    break;
-            }
-
-            // --- Trend gate ---
-            bool trendOk = (close / sma200) < MmCap;
-
-            // --- Exit signal (soft exit: smoothed-RSI rollover) ---
+            // --- Long-side signals ---
+            bool jarvisLong = changeEma > ChangeEmaThreshold;
+            bool maLongRaw = close > zema5 && zema5 > sma21;
+            if (jarvisLong) _barsSinceJarvisLong = 0;
+            else if (_barsSinceJarvisLong < int.MaxValue) _barsSinceJarvisLong++;
+            bool longEntry = ComputeEntry(jarvisLong, maLongRaw, _barsSinceJarvisLong);
+            bool longTrendOk = (close / sma200) < MmCap;            // not overvalued
             bool longExit = changeEma < (ChangeEmaThreshold - CloseDelta);
 
-            // --- Manage existing position on this label/symbol ---
-            var open = FindOpenPosition();
-            if (open != null && longExit)
+            // --- Short-side signals (mirrored; computed only if !LongOnly) ---
+            bool jarvisShort = false, maShortRaw = false;
+            bool shortEntry = false, shortTrendOk = false, shortExit = false;
+            if (!LongOnly)
             {
-                ClosePosition(open);
-                return; // wait one bar before re-entering
+                jarvisShort = changeEma < -ChangeEmaThreshold;
+                maShortRaw = close < zema5 && zema5 < sma21;
+                if (jarvisShort) _barsSinceJarvisShort = 0;
+                else if (_barsSinceJarvisShort < int.MaxValue) _barsSinceJarvisShort++;
+                shortEntry = ComputeEntry(jarvisShort, maShortRaw, _barsSinceJarvisShort);
+                shortTrendOk = (close / sma200) > (1.0 / MmCap);    // not undervalued
+                shortExit = changeEma > -(ChangeEmaThreshold - CloseDelta);
             }
 
-            // --- New entry: only when fully gated AND no open position ---
-            if (open == null && longEntry && trendOk)
+            // --- Position management ---
+            var open = FindOpenPosition();
+            if (open != null)
             {
-                OpenLong(atr);
+                bool isLong = open.TradeType == TradeType.Buy;
+                bool shouldClose =
+                    (isLong && (longExit || (shortEntry && shortTrendOk))) ||
+                    (!isLong && (shortExit || (longEntry && longTrendOk)));
+                if (shouldClose)
+                {
+                    ClosePosition(open);
+                    return; // wait one bar before re-entering
+                }
+            }
+
+            // --- Entry (no open position) ---
+            if (open == null)
+            {
+                if (longEntry && longTrendOk)
+                    OpenPosition(TradeType.Buy, atr);
+                else if (!LongOnly && shortEntry && shortTrendOk)
+                    OpenPosition(TradeType.Sell, atr);
             }
         }
 
-        private void OpenLong(double atr)
+        private bool ComputeEntry(bool jarvis, bool maRaw, int barsSinceJarvis)
+        {
+            switch (Mode)
+            {
+                case EntryMode.JarvisOnly: return jarvis;
+                case EntryMode.MaCrossOnly: return maRaw;
+                case EntryMode.Both:
+                default:
+                    bool maContinuation = maRaw && barsSinceJarvis <= MemoryBars();
+                    return jarvis || maContinuation;
+            }
+        }
+
+        private void OpenPosition(TradeType type, double atr)
         {
             double slDistance = SlAtrMult * atr;
             double tpDistance = slDistance * TpSlRatio;
 
-            // cTrader takes SL/TP as pips (positive distance from entry).
+            // cTrader takes SL/TP as pip distances (positive on both sides;
+            // the platform places them on the correct side of entry).
             double slPips = slDistance / Symbol.PipSize;
             double tpPips = tpDistance / Symbol.PipSize;
 
             double volume = Symbol.QuantityToVolumeInUnits(VolumeLots);
             volume = Symbol.NormalizeVolumeInUnits(volume, RoundingMode.ToNearest);
 
-            var result = ExecuteMarketOrder(TradeType.Buy, SymbolName, volume, Label, slPips, tpPips);
+            var result = ExecuteMarketOrder(type, SymbolName, volume, Label, slPips, tpPips);
             if (!result.IsSuccessful)
-                Print("Entry failed: {0}", result.Error);
+                Print("Entry failed ({0}): {1}", type, result.Error);
         }
 
         private Position FindOpenPosition()
         {
             foreach (var p in Positions)
             {
-                if (p.Label == Label && p.SymbolName == SymbolName && p.TradeType == TradeType.Buy)
-                    return p;
+                if (p.Label == Label && p.SymbolName == SymbolName) return p;
             }
             return null;
         }
