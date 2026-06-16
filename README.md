@@ -5,7 +5,9 @@ A Kotlin/JVM library for **technical analysis** and **strategy backtesting** wit
 
 ## Getting Started
 
+```
 brew install maven
+```
 
 ## Project Structure
 

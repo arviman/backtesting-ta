@@ -79,8 +79,9 @@ namespace cAlgo.Robots
         [Parameter("Label", DefaultValue = "JAMA_Early", Group = "Sizing")]
         public string Label { get; set; }
 
-        [Parameter("Long only", DefaultValue = true, Group = "Sizing")]
-        public bool LongOnly { get; set; }
+        // [Parameter("Long only", DefaultValue = true, Group = "Sizing")]
+        // public bool LongOnly { get; set; }
+        private const bool LongOnly = true; // ponytail: pinned for XAUUSD; un-comment Parameter to optimize
 
         // ────── Risk / exits ──────
         [Parameter("SL × ATR(14)", DefaultValue = 4.0, MinValue = 1.0, Step = 0.5, Group = "Risk")]
@@ -101,25 +102,24 @@ namespace cAlgo.Robots
         public double CloseDelta { get; set; }
 
         // MA-cross controls (gold prefers JarvisOnly, BTC H8 prefers MaCrossOnly).
-        [Parameter("Entry mode", DefaultValue = EntryMode.JarvisOnly, Group = "Entry")]
-        public EntryMode Mode { get; set; }
-
-        [Parameter("MA-cross memory window", DefaultValue = MemoryWindow.Medium, Group = "Entry")]
-        public MemoryWindow JarvisMemory { get; set; }
+        // [Parameter("Entry mode", DefaultValue = EntryMode.JarvisOnly, Group = "Entry")]
+        // public EntryMode Mode { get; set; }
+        // [Parameter("MA-cross memory window", DefaultValue = MemoryWindow.Medium, Group = "Entry")]
+        // public MemoryWindow JarvisMemory { get; set; }
+        private const EntryMode Mode = EntryMode.JarvisOnly;          // ponytail: pinned for XAUUSD
+        private const MemoryWindow JarvisMemory = MemoryWindow.Forever; // ponytail: only matters in Both mode
 
         // ────── Indicators ──────
         private RelativeStrengthIndex _rsi;          // RSI(close, 18)
         private ExponentialMovingAverage _rsiSm1;    // EMA(rsi, 3)
         private ExponentialMovingAverage _rsiSm2;    // EMA(rsiSm1, 12)
-        private SimpleMovingAverage _sma21;
+        // private SimpleMovingAverage _sma21;       // ponytail: MA-cross dead while Mode=JarvisOnly
         private SimpleMovingAverage _sma200;
         private AverageTrueRange _atr;
 
-        // Per-direction jarvis recency counters. MA-cross only counts as
-        // continuation if the same-direction jarvis fired within the memory
-        // window — a long-side jarvis does not validate a short MA-cross.
-        private int _barsSinceJarvisLong = int.MaxValue;
-        private int _barsSinceJarvisShort = int.MaxValue;
+        // ponytail: jarvis-recency counters dead — only used by Mode=Both branch
+        // private int _barsSinceJarvisLong = int.MaxValue;
+        // private int _barsSinceJarvisShort = int.MaxValue;
 
         protected override void OnStart()
         {
@@ -129,7 +129,7 @@ namespace cAlgo.Robots
             _rsiSm1 = Indicators.ExponentialMovingAverage(_rsi.Result, 3);
             _rsiSm2 = Indicators.ExponentialMovingAverage(_rsiSm1.Result, 12);
 
-            _sma21 = Indicators.SimpleMovingAverage(Bars.ClosePrices, 21);
+            // _sma21 = Indicators.SimpleMovingAverage(Bars.ClosePrices, 21); // ponytail: MA-cross dead
             _sma200 = Indicators.SimpleMovingAverage(Bars.ClosePrices, 200);
             _atr = Indicators.AverageTrueRange(14, MovingAverageType.Simple);
 
@@ -148,33 +148,32 @@ namespace cAlgo.Robots
             double rsiSm2Prev = _rsiSm2.Result.Last(2);
             double changeEma = rsiSm2 - rsiSm2Prev;
 
-            double sma21 = _sma21.Result.Last(1);
+            // double sma21 = _sma21.Result.Last(1);              // ponytail: MA-cross dead
             double sma200 = _sma200.Result.Last(1);
             double atr = _atr.Result.Last(1);
             double mm = close / sma200;
 
             // ZEMA(close, 5) computed inline (cTrader has no built-in ZEMA).
-            double zema5 = ComputeZema(closedOffset: 1, length: 5);
+            // double zema5 = ComputeZema(closedOffset: 1, length: 5);  // ponytail: MA-cross dead
 
-            // --- Long-side signals ---
-            bool jarvisLong = changeEma > ChangeEmaThreshold;
-            bool maLongRaw = close > zema5 && zema5 > sma21;
-            if (jarvisLong) _barsSinceJarvisLong = 0;
-            else if (_barsSinceJarvisLong < int.MaxValue) _barsSinceJarvisLong++;
-            bool longEntry = ComputeEntry(jarvisLong, maLongRaw, _barsSinceJarvisLong);
+            // --- Long-side signals (Mode pinned to JarvisOnly) ---
+            bool longEntry = changeEma > ChangeEmaThreshold;     // jarvisLong
+            // bool maLongRaw = close > zema5 && zema5 > sma21;        // ponytail: MA-cross dead
+            // if (longEntry) _barsSinceJarvisLong = 0;
+            // else if (_barsSinceJarvisLong < int.MaxValue) _barsSinceJarvisLong++;
+            // longEntry = ComputeEntry(longEntry, maLongRaw, _barsSinceJarvisLong);
             bool longTrendOk = mm < MmCap;                       // not overvalued
             bool longExit = changeEma < (ChangeEmaThreshold - CloseDelta);
 
             // --- Short-side signals (mirrored; computed only if !LongOnly) ---
-            bool jarvisShort = false, maShortRaw = false;
             bool shortEntry = false, shortTrendOk = false, shortExit = false;
             if (!LongOnly)
             {
-                jarvisShort = changeEma < -ChangeEmaThreshold;
-                maShortRaw = close < zema5 && zema5 < sma21;
-                if (jarvisShort) _barsSinceJarvisShort = 0;
-                else if (_barsSinceJarvisShort < int.MaxValue) _barsSinceJarvisShort++;
-                shortEntry = ComputeEntry(jarvisShort, maShortRaw, _barsSinceJarvisShort);
+                shortEntry = changeEma < -ChangeEmaThreshold;    // jarvisShort
+                // bool maShortRaw = close < zema5 && zema5 < sma21;    // ponytail: MA-cross dead
+                // if (shortEntry) _barsSinceJarvisShort = 0;
+                // else if (_barsSinceJarvisShort < int.MaxValue) _barsSinceJarvisShort++;
+                // shortEntry = ComputeEntry(shortEntry, maShortRaw, _barsSinceJarvisShort);
                 shortTrendOk = mm > (1.0 / MmCap);                // not undervalued
                 shortExit = changeEma > -(ChangeEmaThreshold - CloseDelta);
             }
@@ -204,18 +203,19 @@ namespace cAlgo.Robots
             }
         }
 
-        private bool ComputeEntry(bool jarvis, bool maRaw, int barsSinceJarvis)
-        {
-            switch (Mode)
-            {
-                case EntryMode.JarvisOnly: return jarvis;
-                case EntryMode.MaCrossOnly: return maRaw;
-                case EntryMode.Both:
-                default:
-                    bool maContinuation = maRaw && barsSinceJarvis <= MemoryBars();
-                    return jarvis || maContinuation;
-            }
-        }
+        // ponytail: inlined as `changeEma > ChangeEmaThreshold` while Mode=JarvisOnly
+        // private bool ComputeEntry(bool jarvis, bool maRaw, int barsSinceJarvis)
+        // {
+        //     switch (Mode)
+        //     {
+        //         case EntryMode.JarvisOnly: return jarvis;
+        //         case EntryMode.MaCrossOnly: return maRaw;
+        //         case EntryMode.Both:
+        //         default:
+        //             bool maContinuation = maRaw && barsSinceJarvis <= MemoryBars();
+        //             return jarvis || maContinuation;
+        //     }
+        // }
 
         private void OpenPosition(TradeType type, double atr)
         {
@@ -244,50 +244,54 @@ namespace cAlgo.Robots
             return null;
         }
 
+        // ponytail: ZEMA + MA-cross memory dead while Mode=JarvisOnly.
+        // Uncomment along with the Mode/JarvisMemory [Parameter] attributes
+        // to re-enable.
+
         // ZEMA(close, length): EMA of (2·close − close[lag]) where lag = (length−1)/2.
         // Recomputes fresh over a ~50-bar window each call — cheap on daily.
-        private double ComputeZema(int closedOffset, int length)
-        {
-            int lag = (length - 1) / 2;
-            double alpha = 2.0 / (length + 1);
+        // private double ComputeZema(int closedOffset, int length)
+        // {
+        //     int lag = (length - 1) / 2;
+        //     double alpha = 2.0 / (length + 1);
+        //
+        //     int targetIdx = Bars.Count - 1 - closedOffset;
+        //     if (targetIdx < length + lag)
+        //         return Bars.ClosePrices[Math.Max(0, targetIdx)];
+        //
+        //     int startIdx = Math.Max(lag, targetIdx - 50);
+        //
+        //     double sum = 0;
+        //     for (int i = startIdx; i < startIdx + length; i++)
+        //         sum += Adjusted(i, lag);
+        //     double ema = sum / length;
+        //
+        //     for (int i = startIdx + length; i <= targetIdx; i++)
+        //         ema = alpha * Adjusted(i, lag) + (1 - alpha) * ema;
+        //
+        //     return ema;
+        // }
 
-            int targetIdx = Bars.Count - 1 - closedOffset;
-            if (targetIdx < length + lag)
-                return Bars.ClosePrices[Math.Max(0, targetIdx)];
-
-            int startIdx = Math.Max(lag, targetIdx - 50);
-
-            double sum = 0;
-            for (int i = startIdx; i < startIdx + length; i++)
-                sum += Adjusted(i, lag);
-            double ema = sum / length;
-
-            for (int i = startIdx + length; i <= targetIdx; i++)
-                ema = alpha * Adjusted(i, lag) + (1 - alpha) * ema;
-
-            return ema;
-        }
-
-        private double Adjusted(int i, int lag)
-        {
-            double c = Bars.ClosePrices[i];
-            double cLag = i - lag >= 0 ? Bars.ClosePrices[i - lag] : c;
-            return 2 * c - cLag;
-        }
+        // private double Adjusted(int i, int lag)
+        // {
+        //     double c = Bars.ClosePrices[i];
+        //     double cLag = i - lag >= 0 ? Bars.ClosePrices[i - lag] : c;
+        //     return 2 * c - cLag;
+        // }
 
         // Discrete memory window — friendlier to cTrader's optimizer than a
         // free integer. Forever (50) is effectively legacy OR for MA-cross.
-        private int MemoryBars()
-        {
-            switch (JarvisMemory)
-            {
-                case MemoryWindow.Small: return 5;
-                case MemoryWindow.Medium: return 10;
-                case MemoryWindow.Large: return 20;
-                case MemoryWindow.Forever: return 50;
-                default: return 10;
-            }
-        }
+        // private int MemoryBars()
+        // {
+        //     switch (JarvisMemory)
+        //     {
+        //         case MemoryWindow.Small: return 5;
+        //         case MemoryWindow.Medium: return 10;
+        //         case MemoryWindow.Large: return 20;
+        //         case MemoryWindow.Forever: return 50;
+        //         default: return 10;
+        //     }
+        // }
 
 
         protected override void OnStop()
