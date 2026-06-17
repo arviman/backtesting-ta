@@ -3,8 +3,10 @@
 Two variants of a "smart-money / market-structure" rejection strategy.
 
 - `SwingRejectionBot.cs` — V1, plain rejection setup.
-- `SwingRejectionBotV2.cs` — V1 plus a CHoCH confirmation gate and an
-  HTF-trend gate, both individually toggleable.
+- `SwingRejectionBotV2.cs` — V1 + CHoCH confirmation gate + HTF-trend gate.
+- `SwingRejectionBotV3.cs` — V2 + two extra entry sources: BOS
+  continuation and FVG (Fair Value Gap / order-block) mitigation, both
+  toggleable. Defaults carry V2's optimizer winners.
 
 ## The idea (one paragraph)
 
@@ -77,6 +79,27 @@ than a separate-TF filter.
 | HTF | `HTF MA length` | numeric | SMA length on the HTF |
 | Risk | `SL × ATR(14)` | numeric | Stop distance |
 | Risk | `TP : SL ratio` | numeric | Target distance as multiple of SL |
+
+## V3 — BOS + FVG additions
+
+V3 adds two more entry paths alongside the V2 rejection logic. All three
+sources can be toggled independently so the optimizer can tell us which
+contribute edge.
+
+- **BOS continuation** (`UseBosEntries`): in a confirmed HH/HL regime,
+  fire LONG the bar that closes above the last swing high. Mirror SHORT
+  on close below the last swing low in LH/LL. Pure trend-follow break.
+- **FVG mitigation** (`UseFvgEntries`, `FvgMaxAge`): detect a 3-bar Fair
+  Value Gap on the most recent confirmed triplet (bars at offsets 3, 2,
+  1). Bullish FVG zone = `[high(Last(3)), low(Last(1))]` when those
+  bounds don't overlap. When a later bar closes back into the zone for
+  the first time, fire in the gap's direction. Zone expires after
+  `FvgMaxAge` bars to avoid trading stale levels.
+
+All three sources still pass through the HTF SMA bias when
+`UseHtfFilter` is on. SL/TP, pivot detection, and CHoCH gate logic are
+unchanged from V2. Defaults ship BOS and FVG OFF — turn them on one at
+a time in the optimizer.
 
 ## Optimization grid (V2 — start here)
 
