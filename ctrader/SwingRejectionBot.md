@@ -78,11 +78,32 @@ and a wider SL paired with a moderate TP:SL ratio.
 | Structure | `Wick × ATR(14)` | numeric | Min wick (rejection) size |
 | CHoCH | `Require CHoCH confirm` | bool | Wait for opposing-swing break after setup |
 | CHoCH | `CHoCH lookback (bars)` | numeric | Bars allowed for the break before setup expires |
+| Sweep | `Use liquidity sweep entries` | bool | Adds stop-hunt reversal as a second entry source (independent of CHoCH) |
+| Time | `Use time-of-day filter` | bool | Restrict entries to a server-time window |
+| Time | `Active start hour` | numeric | Window start (inclusive), broker server time |
+| Time | `Active end hour (exclusive)` | numeric | Window end. If end < start, wraps midnight |
 | HTF | `Use HTF trend filter` | bool | Gate by HTF SMA bias |
 | HTF | `HTF timeframe` | enum | H1, H4, D1 |
 | HTF | `HTF MA length` | numeric | SMA length on the HTF |
 | Risk | `SL × ATR(14)` | numeric | Stop distance |
 | Risk | `TP : SL ratio` | numeric | Target distance as multiple of SL |
+
+### Liquidity sweep details
+
+A sweep is the inverse signature of a rejection: instead of wicking
+*short of* the swing level, the bar wicks *beyond* it (taking out
+stops parked above/below) and closes back inside. In a downtrend the
+bar's low pierces `lastSwingLow` and closes above it → long. In an
+uptrend the bar's high pierces `lastSwingHigh` and closes below it →
+short. The sweep bypasses the CHoCH gate because the stop hunt + close
+back is itself the confirmation.
+
+### Time-of-day filter
+
+Hours are read from the bar's `OpenTime` (broker server time). Many
+forex brokers run on UTC+2 or UTC+3, so a 7→21 default roughly covers
+London-to-NY active hours on a UTC broker; shift to fit your server.
+Wraparound is supported (e.g. 22→4 = 22:00–03:59).
 
 ## Optimization grid (V2 — start here)
 

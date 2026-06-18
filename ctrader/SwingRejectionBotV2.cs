@@ -68,6 +68,32 @@ namespace cAlgo.Robots
         [Parameter("HTF MA length", DefaultValue = 55, MinValue = 5, Step = 5, Group = "HTF")]
         public int HtfMaLength { get; set; }
 
+        // ────── Liquidity sweep (stop hunt) ──────
+        // Mirror of rejection: instead of a wick FALLING SHORT of the swing,
+        // a sweep WICKS BEYOND it (taking out stops) and closes back inside.
+        //   Bull sweep (long): downtrend regime, low(1) < lastSwingLow,
+        //                       close(1) > lastSwingLow, real recovery wick.
+        //   Bear sweep (short): uptrend regime, high(1) > lastSwingHigh,
+        //                        close(1) < lastSwingHigh, real rejection wick.
+        // Bypasses the CHoCH gate — the sweep itself is the confirmation.
+        [Parameter("Use liquidity sweep entries", DefaultValue = false, Group = "Sweep")]
+        public bool UseSweepEntries { get; set; }
+
+        // ────── Time-of-day filter ──────
+        // Hours are in BROKER SERVER time (read from bar OpenTime). Typical
+        // broker servers run on UTC+2/+3. For London+NY active window try
+        // start=7, end=21 on a UTC+0 broker; adjust by your server offset.
+        // Wraparound is supported: end < start means the window crosses
+        // midnight (e.g. start=22, end=4 = 22:00 → 03:59).
+        [Parameter("Use time-of-day filter", DefaultValue = false, Group = "Time")]
+        public bool UseTimeFilter { get; set; }
+
+        [Parameter("Active start hour", DefaultValue = 7, MinValue = 0, MaxValue = 23, Step = 1, Group = "Time")]
+        public int StartHour { get; set; }
+
+        [Parameter("Active end hour (exclusive)", DefaultValue = 21, MinValue = 0, MaxValue = 23, Step = 1, Group = "Time")]
+        public int EndHour { get; set; }
+
         // ────── Risk ──────
         [Parameter("SL × ATR(14)", DefaultValue = 4.5, MinValue = 0.5, Step = 0.5, Group = "Risk")]
         public double SlAtrMult { get; set; }
@@ -131,6 +157,14 @@ namespace cAlgo.Robots
             bool rejectedUp = (close - low) >= WickAtrMult * atr && close > _lastSwingLow;
             bool longSetup = downtrend && tagsLow && rejectedUp;
 
+            // ── Liquidity sweep (independent of CHoCH gate) ──
+            bool sweepLong = UseSweepEntries && downtrend
+                && low < _lastSwingLow && close > _lastSwingLow
+                && (close - low) >= WickAtrMult * atr;
+            bool sweepShort = UseSweepEntries && uptrend
+                && high > _lastSwingHigh && close < _lastSwingHigh
+                && (high - close) >= WickAtrMult * atr;
+
             bool htfBullish = !UseHtfFilter || close > _htfSma.Result.LastValue;
             bool htfBearish = !UseHtfFilter || close < _htfSma.Result.LastValue;
 
@@ -157,8 +191,15 @@ namespace cAlgo.Robots
                 longEntry = longSetup;
             }
 
-            shortEntry = shortEntry && htfBearish;
-            longEntry = longEntry && htfBullish;
+            // Merge with sweep, then apply HTF + session gates.
+            shortEntry = (shortEntry || sweepShort) && htfBearish;
+            longEntry = (longEntry || sweepLong) && htfBullish;
+
+            if (UseTimeFilter && !InActiveSession(Bars.OpenTimes.Last(1).Hour))
+            {
+                shortEntry = false;
+                longEntry = false;
+            }
 
             var open = FindOpenPosition();
             if (open != null)
@@ -200,6 +241,13 @@ namespace cAlgo.Robots
                 _prevSwingLow = _lastSwingLow;
                 _lastSwingLow = pivLow;
             }
+        }
+
+        private bool InActiveSession(int hour)
+        {
+            return StartHour < EndHour
+                ? hour >= StartHour && hour < EndHour
+                : hour >= StartHour || hour < EndHour; // wraparound
         }
 
         private static TimeFrame MapTimeFrame(HtfChoice c)
