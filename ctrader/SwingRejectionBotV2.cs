@@ -45,17 +45,17 @@ namespace cAlgo.Robots
         [Parameter("Pivot window (bars each side)", DefaultValue = 3, MinValue = 2, Step = 1, Group = "Structure")]
         public int PivotWindow { get; set; }
 
-        [Parameter("Tag tolerance × ATR(14)", DefaultValue = 0.45, MinValue = 0.05, Step = 0.05, Group = "Structure")]
+        [Parameter("Tag tolerance × ATR(14)", DefaultValue = 0.25, MinValue = 0.05, Step = 0.05, Group = "Structure")]
         public double TagAtrMult { get; set; }
 
-        [Parameter("Wick × ATR(14)", DefaultValue = 0.25, MinValue = 0.05, Step = 0.05, Group = "Structure")]
+        [Parameter("Wick × ATR(14)", DefaultValue = 0.3, MinValue = 0.05, Step = 0.05, Group = "Structure")]
         public double WickAtrMult { get; set; }
 
         // ────── CHoCH gate ──────
-        [Parameter("Require CHoCH confirm", DefaultValue = true, Group = "CHoCH")]
+        [Parameter("Require CHoCH confirm", DefaultValue = false, Group = "CHoCH")]
         public bool RequireChoch { get; set; }
 
-        [Parameter("CHoCH lookback (bars)", DefaultValue = 8, MinValue = 1, Step = 1, Group = "CHoCH")]
+        [Parameter("CHoCH lookback (bars)", DefaultValue = 5, MinValue = 1, Step = 1, Group = "CHoCH")]
         public int ChochLookback { get; set; }
 
         // ────── HTF gate ──────
@@ -65,11 +65,11 @@ namespace cAlgo.Robots
         [Parameter("HTF timeframe", DefaultValue = HtfChoice.H4, Group = "HTF")]
         public HtfChoice HtfTf { get; set; }
 
-        [Parameter("HTF MA length", DefaultValue = 60, MinValue = 5, Step = 5, Group = "HTF")]
+        [Parameter("HTF MA length", DefaultValue = 15, MinValue = 5, Step = 5, Group = "HTF")]
         public int HtfMaLength { get; set; }
 
         // ────── Risk ──────
-        [Parameter("SL × ATR(14)", DefaultValue = 2, MinValue = 0.5, Step = 0.5, Group = "Risk")]
+        [Parameter("SL × ATR(14)", DefaultValue = 4, MinValue = 0.5, Step = 0.5, Group = "Risk")]
         public double SlAtrMult { get; set; }
 
         [Parameter("TP : SL ratio", DefaultValue = 2.5, MinValue = 0.5, Step = 0.5, Group = "Risk")]

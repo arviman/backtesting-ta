@@ -3,10 +3,13 @@
 Two variants of a "smart-money / market-structure" rejection strategy.
 
 - `SwingRejectionBot.cs` — V1, plain rejection setup.
-- `SwingRejectionBotV2.cs` — V1 + CHoCH confirmation gate + HTF-trend gate.
-- `SwingRejectionBotV3.cs` — V2 + two extra entry sources: BOS
-  continuation and FVG (Fair Value Gap / order-block) mitigation, both
-  toggleable. Defaults carry V2's optimizer winners.
+- `SwingRejectionBotV2.cs` — V1 + CHoCH confirmation gate + HTF-trend
+  gate. Current production version.
+
+V3 (with BOS continuation + FVG mitigation entries) was prototyped and
+removed after EURUSD-H4 optimization showed BOS and FVG sources OFF in
+every top run. Restore from git history if a different asset/TF
+benefits from those entry paths.
 
 ## The idea (one paragraph)
 
@@ -42,26 +45,30 @@ starting balance (1.0 lot).
 
 ### EURUSD H4 (V2 — current defaults)
 
-The V2 defaults reflect the top optimizer rows once the HTF + CHoCH gates
-were enabled:
+From the second optimization sweep (this time on V3 with BOS/FVG
+disabled — equivalent to V2):
 
 ```
 PivotWindow          = 3
-TagAtrMult           = 0.45
-WickAtrMult          = 0.25
-RequireChoch         = true
-ChochLookback        = 8
+TagAtrMult           = 0.25
+WickAtrMult          = 0.30
+RequireChoch         = false       # CHoCH gate hurt on EURUSD H4
+ChochLookback        = 5
 UseHtfFilter         = true
 HtfTf                = H4*
-HtfMaLength          = 60
-SlAtrMult            = 2.0
+HtfMaLength          = 15          # short MA → fast trend bias
+SlAtrMult            = 4.0         # wide stop pays off
 TpSlRatio            = 2.5
 VolumeLots           = 1.0
 ```
 
-\* When running on H4 itself, pick D1 here for a true HTF filter. With
-H4 the SMA is on the same timeframe and acts more like a long EMA bias
-than a separate-TF filter.
+\* When running on H4 itself, the H4 SMA is on the same timeframe and
+acts as a fast trend bias rather than a separate-TF filter. Try D1 here
+for a true HTF gate on other assets.
+
+Key shifts vs the V1 winners: tighter tag tolerance, slightly fatter
+wick requirement, CHoCH gate dropped, much shorter HTF MA, and a wider
+SL paired with a slightly lower TP:SL ratio.
 
 ## Parameter reference (V2)
 
@@ -79,27 +86,6 @@ than a separate-TF filter.
 | HTF | `HTF MA length` | numeric | SMA length on the HTF |
 | Risk | `SL × ATR(14)` | numeric | Stop distance |
 | Risk | `TP : SL ratio` | numeric | Target distance as multiple of SL |
-
-## V3 — BOS + FVG additions
-
-V3 adds two more entry paths alongside the V2 rejection logic. All three
-sources can be toggled independently so the optimizer can tell us which
-contribute edge.
-
-- **BOS continuation** (`UseBosEntries`): in a confirmed HH/HL regime,
-  fire LONG the bar that closes above the last swing high. Mirror SHORT
-  on close below the last swing low in LH/LL. Pure trend-follow break.
-- **FVG mitigation** (`UseFvgEntries`, `FvgMaxAge`): detect a 3-bar Fair
-  Value Gap on the most recent confirmed triplet (bars at offsets 3, 2,
-  1). Bullish FVG zone = `[high(Last(3)), low(Last(1))]` when those
-  bounds don't overlap. When a later bar closes back into the zone for
-  the first time, fire in the gap's direction. Zone expires after
-  `FvgMaxAge` bars to avoid trading stale levels.
-
-All three sources still pass through the HTF SMA bias when
-`UseHtfFilter` is on. SL/TP, pivot detection, and CHoCH gate logic are
-unchanged from V2. Defaults ship BOS and FVG OFF — turn them on one at
-a time in the optimizer.
 
 ## Optimization grid (V2 — start here)
 
