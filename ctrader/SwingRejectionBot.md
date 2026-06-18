@@ -107,17 +107,35 @@ Wraparound is supported (e.g. 22→4 = 22:00–03:59).
 
 ## Optimization grid (V2 — start here)
 
-| param | values |
-|---|---|
-| `PivotWindow` | 3, 5, 8 |
-| `TagAtrMult` | 0.35, 0.45, 0.55 |
-| `WickAtrMult` | 0.15, 0.25, 0.35 |
-| `RequireChoch` | false, true |
-| `ChochLookback` | 5, 8, 12 |
-| `UseHtfFilter` | false, true |
-| `HtfMaLength` | 40, 60, 100 |
-| `SlAtrMult` | 2, 3, 4 |
-| `TpSlRatio` | 2, 3, 4 |
+Tightened around the current EURUSD H4 winners, with the two new gates
+(`UseSweepEntries`, `UseTimeFilter`) added as binary toggles + a small
+window of hour bounds for the time filter.
+
+| param | values | n |
+|---|---|---|
+| `PivotWindow` | 5, 8, 10 | 3 |
+| `TagAtrMult` | 0.25, 0.35, 0.45 | 3 |
+| `WickAtrMult` | 0.30, 0.40, 0.50 | 3 |
+| `RequireChoch` | false, true | 2 |
+| `ChochLookback` | 5, 8 | 2 |
+| `UseSweepEntries` | false, true | 2 |
+| `UseTimeFilter` | false, true | 2 |
+| `StartHour` | 0, 7 | 2 |
+| `EndHour` | 16, 20, 23 | 3 |
+| `HtfTf` | H1, H4 | 2 |
+| `HtfMaLength` | 30, 55, 80 | 3 |
+| `SlAtrMult` | 3.0, 4.5, 6.0 | 3 |
+| `TpSlRatio` | 2.5, 3.5, 4.5 | 3 |
+
+= **46,656 runs**. Genetic optimizer finishes in a few hours; full grid
+in ~overnight. Lock `UseHtfFilter = true` (already proven winner) to
+halve the surface.
+
+If the optimizer picks the same V2-only defaults again (sweep OFF, time
+OFF), those features simply don't help on EURUSD H4 — same conclusion
+we got with V3's BOS/FVG. Worth running on at least one other pair
+(GBPUSD, XAUUSD H4) to see whether sweep or session filter pulls weight
+where rejection alone doesn't.
 
 ## Notes & gotchas
 
