@@ -23,23 +23,39 @@ in. ATR-based stops/targets; one position per label.
 | Range | `Opening bars` | 2 | Bars from day-start used to mark the opening range |
 | Filters | `Use HTF trend filter` | true | Long only above Daily SMA, short only below |
 | Filters | `HTF MA length` | 50 | Daily SMA length for the bias |
-| Filters | `Use breakout-window filter` | false | If true, ignore breakouts after a cutoff hour |
-| Filters | `Breakout window end hour` | 20 | The cutoff (broker server time) |
+| Entries | `Use breakout entries` | true | Trade close beyond the OR (standard breakout) |
+| Entries | `Use liquidity sweep entries` | false | Trade *failed* breaks (false-break reversal) |
+| Entries | `Sweep wick × ATR(14)` | 0.4 | Min wick beyond the OR for a sweep to count |
+| Time | `Use time-of-day filter` | false | Restrict entries to a server-time hour window |
+| Time | `Active start hour` | 7 | Window start (inclusive) |
+| Time | `Active end hour (exclusive)` | 21 | Window end. If end < start, wraps midnight |
 | Risk | `SL × ATR(14)` | 2.0 | Stop distance |
 | Risk | `TP : SL ratio` | 2.0 | Target distance as multiple of SL |
 
+### Sweep vs breakout
+
+Same V2 dichotomy: a breakout takes the *successful* clear of the level
+(close beyond), a sweep takes the *failed* clear (wicks beyond then
+closes back inside). Both can be on simultaneously and the optimizer
+will tell you which the asset prefers. Sweep requires a meaningful
+wick (`WickAtrMult × ATR`) to filter noise.
+
 ## Optimization grid (start here on EURUSD H4)
 
-| param | values |
-|---|---|
-| `DayStartHour` | 0, 7, 22 |
-| `OpeningBars` | 1, 2, 3 |
-| `UseHtfFilter` | false, true |
-| `HtfMaLength` | 20, 50, 100 |
-| `UseBreakoutWindow` | false, true |
-| `BreakoutWindowEnd` | 16, 20 |
-| `SlAtrMult` | 1.5, 2, 3 |
-| `TpSlRatio` | 1.5, 2, 3 |
+| param | values | n |
+|---|---|---|
+| `DayStartHour` | 0, 7, 22 | 3 |
+| `OpeningBars` | 1, 2, 3 | 3 |
+| `UseHtfFilter` | false, true | 2 |
+| `HtfMaLength` | 20, 50, 100 | 3 |
+| `UseBreakoutEntries` | false, true | 2 |
+| `UseSweepEntries` | false, true | 2 |
+| `WickAtrMult` | 0.25, 0.4, 0.6 | 3 |
+| `UseTimeFilter` | false, true | 2 |
+| `StartHour` | 0, 7 | 2 |
+| `EndHour` | 16, 20, 23 | 3 |
+| `SlAtrMult` | 1.5, 2, 3 | 3 |
+| `TpSlRatio` | 1.5, 2, 3 | 3 |
 
 ## Notes
 

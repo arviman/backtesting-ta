@@ -48,14 +48,34 @@ namespace cAlgo.Robots
         [Parameter("HTF MA length (Daily SMA)", DefaultValue = 50, MinValue = 5, Step = 5, Group = "Filters")]
         public int HtfMaLength { get; set; }
 
-        [Parameter("Use breakout-window filter", DefaultValue = false, Group = "Filters")]
-        public bool UseBreakoutWindow { get; set; }
+        // ────── Liquidity sweep / false-break reversal ──────
+        // Instead of trading the breakout, take the *failed* break: a bar
+        // wicks beyond the OR but closes back inside (stop hunt). Same
+        // signature as V2's sweep entry, scoped to the OR levels.
+        //   Sweep long  : low(1)  < orLow  && close(1) > orLow  + wick
+        //   Sweep short : high(1) > orHigh && close(1) < orHigh + wick
+        // Breakout and sweep are independently toggleable so the optimizer
+        // can choose either, both, or neither.
+        [Parameter("Use breakout entries", DefaultValue = true, Group = "Entries")]
+        public bool UseBreakoutEntries { get; set; }
 
-        // Only allow entries this many hours after day-start (i.e. skip
-        // the opening-range bars themselves). Set higher to skip stale
-        // late-day breaks.
-        [Parameter("Breakout window end hour", DefaultValue = 20, MinValue = 0, MaxValue = 23, Step = 1, Group = "Filters")]
-        public int BreakoutWindowEnd { get; set; }
+        [Parameter("Use liquidity sweep entries", DefaultValue = false, Group = "Entries")]
+        public bool UseSweepEntries { get; set; }
+
+        [Parameter("Sweep wick × ATR(14)", DefaultValue = 0.4, MinValue = 0.05, Step = 0.05, Group = "Entries")]
+        public double WickAtrMult { get; set; }
+
+        // ────── Time-of-day filter ──────
+        // Hours are in BROKER SERVER time (read from bar OpenTime).
+        // Wraparound supported: end < start crosses midnight.
+        [Parameter("Use time-of-day filter", DefaultValue = false, Group = "Time")]
+        public bool UseTimeFilter { get; set; }
+
+        [Parameter("Active start hour", DefaultValue = 7, MinValue = 0, MaxValue = 23, Step = 1, Group = "Time")]
+        public int StartHour { get; set; }
+
+        [Parameter("Active end hour (exclusive)", DefaultValue = 21, MinValue = 0, MaxValue = 23, Step = 1, Group = "Time")]
+        public int EndHour { get; set; }
 
         // ────── Risk ──────
         [Parameter("SL × ATR(14)", DefaultValue = 2.0, MinValue = 0.5, Step = 0.5, Group = "Risk")]
@@ -84,8 +104,10 @@ namespace cAlgo.Robots
                 _htfBars = MarketData.GetBars(TimeFrame.Daily);
                 _htfSma = Indicators.SimpleMovingAverage(_htfBars.ClosePrices, HtfMaLength);
             }
-            Print("ORB ready. dayStart={0}, ORbars={1}, HTF={2}(D1, sma{3}), winEnd={4}, SL={5}×ATR, TP:SL={6}",
-                  DayStartHour, OpeningBars, UseHtfFilter, HtfMaLength, BreakoutWindowEnd, SlAtrMult, TpSlRatio);
+            Print("ORB ready. dayStart={0}, ORbars={1}, HTF={2}(D1, sma{3}), breakout={4}, sweep={5}, time={6} ({7}→{8}), SL={9}×ATR, TP:SL={10}",
+                  DayStartHour, OpeningBars, UseHtfFilter, HtfMaLength,
+                  UseBreakoutEntries, UseSweepEntries,
+                  UseTimeFilter, StartHour, EndHour, SlAtrMult, TpSlRatio);
         }
 
         protected override void OnBar()
@@ -124,19 +146,37 @@ namespace cAlgo.Robots
 
             if (!_orComplete || _tradedToday) return;
 
-            // Optional breakout window: stop trading new breaks after a cutoff hour.
-            if (UseBreakoutWindow && openTime.Hour >= BreakoutWindowEnd) return;
+            if (UseTimeFilter && !InActiveSession(openTime.Hour)) return;
 
             bool htfBullish = !UseHtfFilter || close > _htfSma.Result.LastValue;
             bool htfBearish = !UseHtfFilter || close < _htfSma.Result.LastValue;
 
-            bool longEntry = close > _orHigh && htfBullish;
-            bool shortEntry = close < _orLow && htfBearish;
+            // Breakout: close clears the OR in the trend direction.
+            bool brkLong = UseBreakoutEntries && close > _orHigh;
+            bool brkShort = UseBreakoutEntries && close < _orLow;
+
+            // Sweep: bar wicks beyond the OR but closes back inside.
+            bool sweepLong = UseSweepEntries
+                && low < _orLow && close > _orLow
+                && (close - low) >= WickAtrMult * atr;
+            bool sweepShort = UseSweepEntries
+                && high > _orHigh && close < _orHigh
+                && (high - close) >= WickAtrMult * atr;
+
+            bool longEntry = (brkLong || sweepLong) && htfBullish;
+            bool shortEntry = (brkShort || sweepShort) && htfBearish;
 
             if (FindOpenPosition() != null) return;
 
             if (longEntry) { OpenPosition(TradeType.Buy, atr); _tradedToday = true; }
             else if (shortEntry) { OpenPosition(TradeType.Sell, atr); _tradedToday = true; }
+        }
+
+        private bool InActiveSession(int hour)
+        {
+            return StartHour < EndHour
+                ? hour >= StartHour && hour < EndHour
+                : hour >= StartHour || hour < EndHour;
         }
 
         // Day key based on DayStartHour: bars before DayStartHour belong to "yesterday".
