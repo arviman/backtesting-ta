@@ -42,13 +42,13 @@ namespace cAlgo.Robots
         public string Label { get; set; }
 
         // ────── Structure ──────
-        [Parameter("Pivot window (bars each side)", DefaultValue = 3, MinValue = 2, Step = 1, Group = "Structure")]
+        [Parameter("Pivot window (bars each side)", DefaultValue = 8, MinValue = 2, Step = 1, Group = "Structure")]
         public int PivotWindow { get; set; }
 
-        [Parameter("Tag tolerance × ATR(14)", DefaultValue = 0.25, MinValue = 0.05, Step = 0.05, Group = "Structure")]
+        [Parameter("Tag tolerance × ATR(14)", DefaultValue = 0.35, MinValue = 0.05, Step = 0.05, Group = "Structure")]
         public double TagAtrMult { get; set; }
 
-        [Parameter("Wick × ATR(14)", DefaultValue = 0.3, MinValue = 0.05, Step = 0.05, Group = "Structure")]
+        [Parameter("Wick × ATR(14)", DefaultValue = 0.4, MinValue = 0.05, Step = 0.05, Group = "Structure")]
         public double WickAtrMult { get; set; }
 
         // ────── CHoCH gate ──────
@@ -62,17 +62,17 @@ namespace cAlgo.Robots
         [Parameter("Use HTF trend filter", DefaultValue = true, Group = "HTF")]
         public bool UseHtfFilter { get; set; }
 
-        [Parameter("HTF timeframe", DefaultValue = HtfChoice.H4, Group = "HTF")]
+        [Parameter("HTF timeframe", DefaultValue = HtfChoice.H1, Group = "HTF")]
         public HtfChoice HtfTf { get; set; }
 
-        [Parameter("HTF MA length", DefaultValue = 15, MinValue = 5, Step = 5, Group = "HTF")]
+        [Parameter("HTF MA length", DefaultValue = 55, MinValue = 5, Step = 5, Group = "HTF")]
         public int HtfMaLength { get; set; }
 
         // ────── Risk ──────
-        [Parameter("SL × ATR(14)", DefaultValue = 4, MinValue = 0.5, Step = 0.5, Group = "Risk")]
+        [Parameter("SL × ATR(14)", DefaultValue = 4.5, MinValue = 0.5, Step = 0.5, Group = "Risk")]
         public double SlAtrMult { get; set; }
 
-        [Parameter("TP : SL ratio", DefaultValue = 2.5, MinValue = 0.5, Step = 0.5, Group = "Risk")]
+        [Parameter("TP : SL ratio", DefaultValue = 3.5, MinValue = 0.5, Step = 0.5, Group = "Risk")]
         public double TpSlRatio { get; set; }
 
         private AverageTrueRange _atr;

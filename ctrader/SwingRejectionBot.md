@@ -49,26 +49,23 @@ From the second optimization sweep (this time on V3 with BOS/FVG
 disabled — equivalent to V2):
 
 ```
-PivotWindow          = 3
-TagAtrMult           = 0.25
-WickAtrMult          = 0.30
+PivotWindow          = 8
+TagAtrMult           = 0.35
+WickAtrMult          = 0.40
 RequireChoch         = false       # CHoCH gate hurt on EURUSD H4
 ChochLookback        = 5
 UseHtfFilter         = true
-HtfTf                = H4*
-HtfMaLength          = 15          # short MA → fast trend bias
-SlAtrMult            = 4.0         # wide stop pays off
-TpSlRatio            = 2.5
+HtfTf                = H1          # H1 SMA from H4 chart = LTF micro-trend gate
+HtfMaLength          = 55
+SlAtrMult            = 4.5         # wide stop pays off
+TpSlRatio            = 3.5
 VolumeLots           = 1.0
 ```
 
-\* When running on H4 itself, the H4 SMA is on the same timeframe and
-acts as a fast trend bias rather than a separate-TF filter. Try D1 here
-for a true HTF gate on other assets.
-
-Key shifts vs the V1 winners: tighter tag tolerance, slightly fatter
-wick requirement, CHoCH gate dropped, much shorter HTF MA, and a wider
-SL paired with a slightly lower TP:SL ratio.
+Key shifts vs the V1 winners: wider pivot window (fewer false swings),
+tighter tag tolerance, fatter wick requirement, CHoCH gate dropped, an
+H1 SMA(55) trend bias (acting as a fast micro-trend filter from H4),
+and a wider SL paired with a moderate TP:SL ratio.
 
 ## Parameter reference (V2)
 
