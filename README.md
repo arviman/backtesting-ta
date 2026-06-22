@@ -22,7 +22,7 @@ backtesting-ta/
 │   ├── chart_data_EOS_USDT_p5_730d.csv   # EOS/USDT 2 years
 │   └── chart_data_STR_USDT_p5_730d.csv   # STR/USDT 2 years
 └── src/
-    └── main/kotlin/com/pschlup/ta/
+    └── main/kotlin/com/arviman/ta/
         ├── BackTestDemo.kt              # Entry point: runs a demo backtest on BTC/USDT
         ├── backtest/                    # Backtesting engine
         │   ├── BackTester.kt            # Core event loop — iterates bars, evaluates signals, manages trades
@@ -49,7 +49,7 @@ backtesting-ta/
             ├── CsvBarSource.kt          # Parses OHLCV CSV files into List<Bar>
             └── UnstablePeriodException.kt  # Thrown when insufficient bars for an indicator
 
-src/test/kotlin/com/pschlup/ta/
+src/test/kotlin/com/arviman/ta/
 ├── helpers/
 │   └── FakeTimeSeries.kt               # Test utility: builds TimeSeries from arrays
 ├── indicators/
@@ -108,7 +108,7 @@ Final balance      : $61,521.90
 ### 1. Loading Data
 
 ```kotlin
-import com.pschlup.ta.timeseries.readCsvBars
+import com.arviman.ta.timeseries.readCsvBars
 
 val bars = readCsvBars("sampledata/chart_data_BTC_USDT_p5_730d.csv")
 ```
@@ -118,8 +118,8 @@ CSV format expects columns: `Date,Open,High,Low,Close,Volume` (timestamps in ISO
 ### 2. Managing Time Series
 
 ```kotlin
-import com.pschlup.ta.timeseries.TimeFrame
-import com.pschlup.ta.timeseries.TimeSeriesManager
+import com.arviman.ta.timeseries.TimeFrame
+import com.arviman.ta.timeseries.TimeSeriesManager
 
 val manager = TimeSeriesManager(inputTimeFrame = TimeFrame.M5)
 
@@ -142,7 +142,7 @@ Bar indices are **reverse-chronological**: index `0` is the latest/newest bar, i
 ### 3. Computing Indicators
 
 ```kotlin
-import com.pschlup.ta.indicators.*
+import com.arviman.ta.indicators.*
 
 // Price extractors
 val close = h1.closePrice
@@ -193,7 +193,7 @@ Indicators are **lazy and dynamic** — they recompute as new bars are added to 
 Signals are boolean `fun interface`s that can be combined with infix operators:
 
 ```kotlin
-import com.pschlup.ta.strategy.*
+import com.arviman.ta.strategy.*
 
 val ema8  = close.ema(8)
 val ema21 = close.ema(21)
@@ -222,8 +222,8 @@ val shouldEnter: Boolean = entry.latestValue     // same as entry[0]
 ### 5. Defining a Strategy & Backtest
 
 ```kotlin
-import com.pschlup.ta.backtest.*
-import com.pschlup.ta.strategy.Strategy
+import com.arviman.ta.backtest.*
+import com.arviman.ta.strategy.Strategy
 
 val spec = BackTestSpec(
     tradeType = TradeType.LONG,

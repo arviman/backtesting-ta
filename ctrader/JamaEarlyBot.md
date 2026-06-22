@@ -1,7 +1,7 @@
 # JamaEarlyBot — cTrader cBot
 
 C# port of the JAMA early-entry strategy from the Kotlin backtest in this
-repo (`src/main/kotlin/com/pschlup/ta/strategy/JamaStrategy.kt`).
+repo (`src/main/kotlin/com/arviman/ta/strategy/JamaStrategy.kt`).
 
 Long-only by default. Mirrored short side available via the `LongOnly`
 toggle. Defaults are tuned to the H8 XAUUSD optimization winner.

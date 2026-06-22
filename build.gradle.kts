@@ -3,7 +3,7 @@ plugins {
     application
 }
 
-group = "com.pschlup"
+group = "com.arviman"
 version = "1.0-SNAPSHOT"
 
 kotlin {
@@ -11,7 +11,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("com.pschlup.ta.SqueezeMomentumLeveragedTest")
+    mainClass.set("com.arviman.ta.SqueezeMomentumLeveragedTest")
 }
 
 repositories {

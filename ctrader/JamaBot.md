@@ -1,7 +1,7 @@
 # JAMA_HCC — strategy notes (no cBot port)
 
 The original JAMA HCC strategy is implemented in Kotlin only
-(`src/main/kotlin/com/pschlup/ta/strategy/JamaStrategy.kt`). It's the
+(`src/main/kotlin/com/arviman/ta/strategy/JamaStrategy.kt`). It's the
 "full-gate" version of what `JamaEarlyBot.cs` is the early-entry port
 of. This doc summarises the original so the cBot port can be re-derived
 later if needed.
@@ -57,10 +57,10 @@ slope is just the `angle(sma50)` from `JamaIndicators.kt` ported to C#.
 
 ## Reading list
 
-- Strategy code: `src/main/kotlin/com/pschlup/ta/strategy/JamaStrategy.kt`
-- Indicators: `src/main/kotlin/com/pschlup/ta/indicators/JamaIndicators.kt`
-- Backtest harness: `src/main/kotlin/com/pschlup/ta/backtest/BackTester.kt`
-- Smoke tests / sweeps: `src/main/kotlin/com/pschlup/ta/JamaMemoryTest.kt`,
+- Strategy code: `src/main/kotlin/com/arviman/ta/strategy/JamaStrategy.kt`
+- Indicators: `src/main/kotlin/com/arviman/ta/indicators/JamaIndicators.kt`
+- Backtest harness: `src/main/kotlin/com/arviman/ta/backtest/BackTester.kt`
+- Smoke tests / sweeps: `src/main/kotlin/com/arviman/ta/JamaMemoryTest.kt`,
   `ParameterSweep.kt`, `GoldComparison.kt`
 - cBot port of the early variant: `ctrader/JamaEarlyBot.cs`,
   documented in `ctrader/JamaEarlyBot.md`
