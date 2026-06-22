@@ -68,6 +68,17 @@ class BackTestReport(
       return if (loss < 0) avgWinPct / -loss else Double.NaN
     }
 
+  /**
+   * Profit factor: sum of winning trade P/L ÷ |sum of losing trade P/L|.
+   * > 1 = profitable; 1.5–2 = good; > 2 = excellent.
+   */
+  val profitFactor: Double
+    get() {
+      val wins = trades.filter { it.isProfitable }.sumOf { it.profitLoss }
+      val losses = trades.filter { !it.isProfitable }.sumOf { it.profitLoss }
+      return if (losses < 0) wins / -losses else Double.POSITIVE_INFINITY
+    }
+
   private fun tradeReturnPct(t: TradeRecord): Double =
     t.profitLoss / (t.entryPrice * t.amount)
 

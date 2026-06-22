@@ -25,19 +25,23 @@ data class TpSlTier(
   val stopLossPct: Double? = null,
   /** Stop-loss distance as N × ATR-at-entry below/above entry price. */
   val stopLossAtrMultiplier: Double? = null,
+  /** Stop-loss distance in absolute price points (LONG: entry − slAbs). */
+  val stopLossAbs: Double? = null,
   /** Take-profit distance as fraction of entry price (LONG: entry × (1 + tpPct)). */
   val takeProfitPct: Double? = null,
   /** Take-profit distance as N × ATR-at-entry above/below entry price. */
   val takeProfitAtrMultiplier: Double? = null,
+  /** Take-profit distance in absolute price points (LONG: entry + tpAbs). */
+  val takeProfitAbs: Double? = null,
   /** Optional % trailing stop (e.g. 0.05 = 5% behind current price). */
   val trailingStopPct: Double? = null,
 ) {
   init {
-    require((stopLossPct == null) != (stopLossAtrMultiplier == null)) {
-      "Tier needs exactly one of stopLossPct or stopLossAtrMultiplier"
+    require(listOfNotNull(stopLossPct, stopLossAtrMultiplier, stopLossAbs).size == 1) {
+      "Tier needs exactly one of stopLossPct, stopLossAtrMultiplier, or stopLossAbs"
     }
-    require((takeProfitPct == null) != (takeProfitAtrMultiplier == null)) {
-      "Tier needs exactly one of takeProfitPct or takeProfitAtrMultiplier"
+    require(listOfNotNull(takeProfitPct, takeProfitAtrMultiplier, takeProfitAbs).size == 1) {
+      "Tier needs exactly one of takeProfitPct, takeProfitAtrMultiplier, or takeProfitAbs"
     }
   }
 }

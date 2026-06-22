@@ -91,7 +91,7 @@ private class ColumnIndex(header: List<String>) {
   }
 
   companion object {
-    private val dateNames = setOf("date", "time", "timestamp", "datetime")
+    private val dateNames = setOf("date", "time", "timestamp", "datetime", "open time")
     private val openNames = setOf("open")
     private val highNames = setOf("high")
     private val lowNames = setOf("low")
@@ -105,6 +105,7 @@ private class ColumnIndex(header: List<String>) {
 // ===========================================================
 
 private val DATE_FORMAT_MM_DD_YYYY = DateTimeFormatter.ofPattern("M/d/yyyy")
+private val DATE_FORMAT_YYYY_MM_DD_HH_MM_SS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
 private fun parseDateTime(value: String): Instant {
   val cleaned = value.trim().replace("\"", "")
@@ -112,11 +113,16 @@ private fun parseDateTime(value: String): Instant {
     Instant.parse(cleaned)
   } catch (_: Exception) {
     try {
-      LocalDate.parse(cleaned, DATE_FORMAT_MM_DD_YYYY)
-        .atStartOfDay(ZoneOffset.UTC)
-        .toInstant()
-    } catch (e: Exception) {
-      throw IllegalArgumentException("Cannot parse date: $cleaned", e)
+      java.time.LocalDateTime.parse(cleaned, DATE_FORMAT_YYYY_MM_DD_HH_MM_SS)
+        .toInstant(ZoneOffset.UTC)
+    } catch (_: Exception) {
+      try {
+        LocalDate.parse(cleaned, DATE_FORMAT_MM_DD_YYYY)
+          .atStartOfDay(ZoneOffset.UTC)
+          .toInstant()
+      } catch (e: Exception) {
+        throw IllegalArgumentException("Cannot parse date: $cleaned", e)
+      }
     }
   }
 }

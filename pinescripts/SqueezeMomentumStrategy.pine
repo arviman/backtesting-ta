@@ -1,0 +1,115 @@
+//@version=5
+// Squeeze Momentum Strategy — Pine v5 strategy port of LazyBear's
+// SQZMOM_LB indicator. Defaults match the ETH 1H optimization
+// winners: BB(10, 2.1) + KC(20, 0.1).
+//
+// With KC multiplier this low, the "squeeze on" state effectively
+// never fires (BB never sits inside the narrow KC), so the squeeze
+// release transition is not used as an entry. The entry signal is
+// instead the histogram (val) crossing zero — sign change = momentum
+// shift. The squeeze visualization (black/gray/blue dots) is still
+// drawn for context.
+//
+// Original indicator: https://www.tradingview.com/v/4IneGo8h/
+
+strategy(
+     title              = "Squeeze Momentum Strategy [LazyBear port]",
+     shorttitle         = "SQZMOM_STRAT",
+     overlay            = false,
+     pyramiding         = 6,
+     default_qty_type   = strategy.fixed,
+     default_qty_value  = 0.8,
+     initial_capital    = 13000,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.04,
+     process_orders_on_close = true)
+
+// ────────── Inputs: squeeze momentum ──────────
+bbLen   = input.int(10,  "BB length",         minval=2, group="Squeeze")
+bbMult  = input.float(2.1, "BB multFactor",   step=0.1, group="Squeeze")
+kcLen   = input.int(20,  "KC length",         minval=2, group="Squeeze")
+kcMult  = input.float(0.1, "KC multFactor",   step=0.05, group="Squeeze")
+useTR   = input.bool(true, "Use TrueRange (KC)", group="Squeeze")
+
+// ────────── Inputs: entry / exit ──────────
+entryMode = input.string("Zero cross",
+     "Entry mode",
+     options=["Zero cross", "Color change"],
+     group="Entries",
+     tooltip="Zero cross: long when val crosses up through 0, short on cross down. " +
+             "Color change: long when val turns lime (positive & rising), short when red (negative & falling).")
+
+slPoints = input.float(49,  "SL (price points)", minval=0.0, step=1, group="Risk")
+tpRatio  = input.float(0.5, "TP : SL ratio",     minval=0.0, step=0.1, group="Risk")
+qty      = input.float(0.8, "Order volume",      minval=0.0, step=0.1, group="Risk")
+
+// ────────── Inputs: HTF filter ──────────
+useHtf  = input.bool(true,    "Use HTF MA filter",        group="HTF")
+htfRes  = input.timeframe("60", "HTF resolution",         group="HTF")
+htfLen  = input.int(47,         "HTF MA length", minval=2, group="HTF")
+
+// ────────── Squeeze momentum (LazyBear original) ──────────
+src      = close
+basis    = ta.sma(src, bbLen)
+dev      = bbMult * ta.stdev(src, bbLen)
+upperBB  = basis + dev
+lowerBB  = basis - dev
+
+ma       = ta.sma(src, kcLen)
+rng      = useTR ? ta.tr : (high - low)
+rngma    = ta.sma(rng, kcLen)
+upperKC  = ma + rngma * kcMult
+lowerKC  = ma - rngma * kcMult
+
+sqzOn  = (lowerBB > lowerKC) and (upperBB < upperKC)
+sqzOff = (lowerBB < lowerKC) and (upperBB > upperKC)
+noSqz  = not sqzOn and not sqzOff
+
+val = ta.linreg(
+     src - math.avg(math.avg(ta.highest(high, kcLen), ta.lowest(low, kcLen)), ta.sma(close, kcLen)),
+     kcLen, 0)
+
+// ────────── Plot (same colors as the original indicator) ──────────
+bcolor = val > 0
+     ? (val > nz(val[1]) ? color.lime : color.green)
+     : (val < nz(val[1]) ? color.red  : color.maroon)
+scolor = noSqz ? color.blue : (sqzOn ? color.black : color.gray)
+plot(val, "Squeeze Momentum", color=bcolor, style=plot.style_histogram, linewidth=4)
+plot(0,   "Zero",             color=scolor, style=plot.style_cross,     linewidth=2)
+
+// ────────── HTF filter ──────────
+htfMa       = request.security(syminfo.tickerid, htfRes, ta.sma(close, htfLen), lookahead=barmerge.lookahead_off)
+htfBullish  = not useHtf or close > htfMa
+htfBearish  = not useHtf or close < htfMa
+
+// ────────── Entry signals ──────────
+zeroLong   = ta.crossover(val, 0)
+zeroShort  = ta.crossunder(val, 0)
+
+// "Color change" = transition into lime (val>0 & rising after not lime)
+limeNow    = val > 0 and val > nz(val[1])
+limePrev   = val[1] > 0 and val[1] > nz(val[2])
+redNow     = val < 0 and val < nz(val[1])
+redPrev    = val[1] < 0 and val[1] < nz(val[2])
+colorLong  = limeNow and not limePrev
+colorShort = redNow  and not redPrev
+
+longSig  = (entryMode == "Zero cross" ? zeroLong  : colorLong)  and htfBullish
+shortSig = (entryMode == "Zero cross" ? zeroShort : colorShort) and htfBearish
+
+// ────────── Orders ──────────
+if longSig
+    strategy.entry("L", strategy.long,  qty=qty)
+if shortSig
+    strategy.entry("S", strategy.short, qty=qty)
+
+// SL/TP from average entry price; both sides exit the whole position.
+longStop   = strategy.position_avg_price - slPoints
+longLimit  = strategy.position_avg_price + slPoints * tpRatio
+shortStop  = strategy.position_avg_price + slPoints
+shortLimit = strategy.position_avg_price - slPoints * tpRatio
+
+if strategy.position_size > 0
+    strategy.exit("L-x", "L", stop=longStop, limit=longLimit)
+if strategy.position_size < 0
+    strategy.exit("S-x", "S", stop=shortStop, limit=shortLimit)

@@ -11,7 +11,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("com.pschlup.ta.JamaMemoryTest")
+    mainClass.set("com.pschlup.ta.SqueezeMomentumLeveragedTest")
 }
 
 repositories {

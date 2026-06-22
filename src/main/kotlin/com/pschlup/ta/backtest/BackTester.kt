@@ -112,14 +112,22 @@ object BackTester {
   ) {
     // Resolve each tier's SL and TP distances in price-fraction units.
     val resolved = ladder.map { tier ->
-      val slDistFrac = tier.stopLossAtrMultiplier?.let {
-        val atr = requireNotNull(atrAtEntry) { "entryAtrFactory required for ATR-based SL" }
-        (it * atr) / currentPrice
-      } ?: tier.stopLossPct!!
-      val tpDistFrac = tier.takeProfitAtrMultiplier?.let {
-        val atr = requireNotNull(atrAtEntry) { "entryAtrFactory required for ATR-based TP" }
-        (it * atr) / currentPrice
-      } ?: tier.takeProfitPct!!
+      val slDistFrac = when {
+        tier.stopLossAtrMultiplier != null -> {
+          val atr = requireNotNull(atrAtEntry) { "entryAtrFactory required for ATR-based SL" }
+          (tier.stopLossAtrMultiplier * atr) / currentPrice
+        }
+        tier.stopLossAbs != null -> tier.stopLossAbs / currentPrice
+        else -> tier.stopLossPct!!
+      }
+      val tpDistFrac = when {
+        tier.takeProfitAtrMultiplier != null -> {
+          val atr = requireNotNull(atrAtEntry) { "entryAtrFactory required for ATR-based TP" }
+          (tier.takeProfitAtrMultiplier * atr) / currentPrice
+        }
+        tier.takeProfitAbs != null -> tier.takeProfitAbs / currentPrice
+        else -> tier.takeProfitPct!!
+      }
       Triple(tier, slDistFrac, tpDistFrac)
     }
     val maxAffordable = tradeHistory.balance / currentPrice
