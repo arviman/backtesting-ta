@@ -11,7 +11,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("com.arviman.ta.SqueezeMomentumLeveragedTest")
+    mainClass.set("com.arviman.ta.OpenDriveFadeTest")
 }
 
 tasks.named<JavaExec>("run") {
