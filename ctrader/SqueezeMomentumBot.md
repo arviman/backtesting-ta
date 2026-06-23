@@ -112,6 +112,40 @@ Max Open Positions = 4
 Drop to 5 ETH if you want 100% survival across the tested years (gives
 up 1 P1 hit rate in exchange for higher confidence).
 
+## Funded-account variant (re-enable structural SL)
+
+Once you've passed the evaluation phases and the strict $5k daily-loss
+rule is replaced by funded-account terms (or you're trading personal
+capital), turning **structural SL back on** ~doubles absolute profit:
+
+| Metric | Static SL (eval config) | Structural SL lb=80 (funded) |
+|---|---|---|
+| 3yr profit (5 ETH) | +$27,572 | **+$59,400** |
+| 3yr peak DD | $13,410 | $26,862 |
+| Profit Factor | 1.15 | **1.21** |
+| Max daily loss | $1,702 | $5,837 (busts eval rule) |
+| Win rate | 48.0% | 39.2% |
+
+### Funded-variant settings
+
+```
+SL Lookback Bars  = 80      (uncomment [Parameter] in source — see comment block)
+SL Buffer (pips)  = 5
+TP Multiplier     = 1.0
+Volume (Lots)     = 0.5     (= 5 ETH on a 1lot=10ETH broker)
+```
+
+The other params stay identical to the eval config (BB 11/2.3, KC 22/1.4,
+HTF SMA 47, MaxPositions 4, RequireProfit ON).
+
+### Caveat
+
+Check your funded program's daily-loss rule before enabling. Some
+funded programs keep the same $5k daily rule as the eval — in which
+case structural SL still busts at 5+ ETH. Drop to 3 ETH (`Volume 0.3`)
+to bring max daily under $3.5k while still capturing most of the
+structural-SL upside.
+
 ## Sizing for the5ers ($5-10k accounts)
 
 The strategy is fundamentally too aggressive for sub-$30k accounts at

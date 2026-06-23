@@ -70,10 +70,30 @@ namespace cAlgo.Robots
         [Parameter("Stop Loss (pips)", Group = "Trade", DefaultValue = 47, MinValue = 1)]
         public int StopLossPips { get; set; }
 
-        // Structural SL (look back N bars for swing low/high) is DISABLED for
-        // prop-firm use. Wider SL on retracements busts the $5k max-daily-loss
-        // rule (the5ers / FTMO) even though it's profit-positive on personal
-        // accounts. Keep at 0 unless you're trading your own capital.
+        // ─────────────────────────────────────────────────────────────────
+        // Structural SL — DISABLED by default for the5ers/FTMO evaluation.
+        // ─────────────────────────────────────────────────────────────────
+        // The structural SL widens the stop to the N-bar prior swing low/high
+        // when farther than the static 47-pip floor. It catches more reversals
+        // (profits double on Kotlin 3yr OS: $27k → $59k at 5 ETH per entry)
+        // but pays for it with deeper retracements: daily floating losses
+        // reach $5,800 at 5 ETH, which busts the5ers / FTMO $5k max-daily-loss
+        // rule. Static is the only viable choice for evaluations.
+        //
+        // FUNDED-ACCOUNT VARIANT: once you've passed the evaluation and the
+        // daily-loss rule is relaxed (or you're trading personal capital with
+        // no DD ceiling), re-enable structural SL with these empirical winners:
+        //
+        //   SlLookbackBars = 80   // 80 bars ≈ 3.3 days on H1
+        //   SlBufferPips   = 5    // 5 pips past the swing for spread tolerance
+        //   VolumeInLots   = 0.5  // 5 ETH per entry on 1lot=10ETH broker
+        //
+        // Backtest 3yr OS at funded-variant config: +$59,400 profit / $26,862
+        // peak DD / PF 1.21 (vs +$27,572 / $13,410 / PF 1.15 for static).
+        //
+        // To enable: uncomment the [Parameter] lines and DELETE the matching
+        // private const lines below them. Test daily loss against your funded
+        // account's specific rule before going live.
         // [Parameter("SL Lookback Bars (0 = static SL)", Group = "Trade", DefaultValue = 0, MinValue = 0, MaxValue = 500, Step = 10)]
         // public int SlLookbackBars { get; set; }
         private const int SlLookbackBars = 0;
