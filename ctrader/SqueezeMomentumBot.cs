@@ -96,10 +96,10 @@ namespace cAlgo.Robots
         // account's specific rule before going live.
         // [Parameter("SL Lookback Bars (0 = static SL)", Group = "Trade", DefaultValue = 0, MinValue = 0, MaxValue = 500, Step = 10)]
         // public int SlLookbackBars { get; set; }
-        private const int SlLookbackBars = 0;
+        private int SlLookbackBars = 0;
         // [Parameter("SL Buffer (pips)", Group = "Trade", DefaultValue = 5, MinValue = 0, MaxValue = 50, Step = 1)]
         // public int SlBufferPips { get; set; }
-        private const int SlBufferPips = 5;
+        private int SlBufferPips = 5;
 
         [Parameter("TP Multiplier (× SL, 0 = off)", Group = "Trade", DefaultValue = 1.0, MinValue = 0.0, MaxValue = 5, Step = 0.1)]
         public double TpMultiplier { get; set; }
@@ -113,18 +113,18 @@ namespace cAlgo.Robots
         // gate is exposed as it's the one improvement worth keeping ON.
         // [Parameter("Min Distance Between Entries (pips)", Group = "Pyramiding", DefaultValue = 0, MinValue = 0)]
         // public int MinEntryDistancePips { get; set; }
-        private const int MinEntryDistancePips = 0;
+        private int MinEntryDistancePips = 0;
 
         [Parameter("Require Profit to Pyramid", Group = "Pyramiding", DefaultValue = true)]
         public bool RequireProfitToPyramid { get; set; }
 
         // [Parameter("SL Stagger per Position (pips)", Group = "Pyramiding", DefaultValue = 0, MinValue = -50, MaxValue = 50)]
         // public int SlStaggerPips { get; set; }
-        private const int SlStaggerPips = 0;
+        private int SlStaggerPips = 0;
 
         // [Parameter("TP Multiplier Stagger per Pos", Group = "Pyramiding", DefaultValue = 0.0, MinValue = -5, MaxValue = 5)]
         // public double TpStaggerMultiplier { get; set; }
-        private const double TpStaggerMultiplier = 0.0;
+        private double TpStaggerMultiplier = 0.0;
 
         // ────── Trailing Stop (off by default) ──────
         public bool UseTrailingStop = false;
