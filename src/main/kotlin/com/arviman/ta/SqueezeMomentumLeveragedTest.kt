@@ -77,8 +77,8 @@ object SqueezeMomentumLeveragedTest {
   )
 
   // Level 1 SL-lookback sweep. 0 = static 47-pip SL (baseline).
-  // Focus on the winner (80) plus neighbours for confidence.
-  private val slLookbackBars = listOf(0, 50, 80, 100)
+  // Comparing static-SL vs structural-SL to see DD impact.
+  private val slLookbackBars = listOf(0, 80)
 
   @JvmStatic
   fun main(args: Array<String>) {
@@ -137,64 +137,70 @@ object SqueezeMomentumLeveragedTest {
       ))
     }
 
-    // ── Yearly equity breakdown for the best config ──
+    // ── Yearly equity breakdown for every config ──
     // No withdrawals; equity compounds across years. Year-start = previous
     // year-end (except first year, which starts at $13k baseline balance).
     // The FromStartDD column is what FTMO/the5ers actually enforce.
-    println("\n=== Yearly equity breakdown for best config (${best.first}) ===")
-    println("%-6s | %-9s | %-9s | %-9s | %-9s | %-9s | %-12s".format(
-      "Year", "Start$", "End$", "Max$", "Min$", "PnL$", "FromStartDD$"))
-    println("-".repeat(78))
-    val yearlyPnL = best.second.yearlyPnL
-    val yearlyDD = best.second.yearlyDD
-    val yearlyStart = best.second.yearlyStart
-    val yearlyEnd = best.second.yearlyEnd
-    val yearlyMaxEq = best.second.yearlyMaxEq
-    val yearlyMinEq = best.second.yearlyMinEq
-    val allYears = if (yearlyPnL.isEmpty()) emptyList()
-      else (yearlyPnL.keys.min()..yearlyPnL.keys.max()).toList()
-    for (year in allYears) {
-      val pnl = yearlyPnL[year] ?: 0.0
-      val dd = yearlyDD[year] ?: 0.0
-      val ys = yearlyStart[year] ?: 0.0
-      val ye = yearlyEnd[year] ?: 0.0
-      val ymax = yearlyMaxEq[year] ?: 0.0
-      val ymin = yearlyMinEq[year] ?: 0.0
-      println("%-6d | %,9.0f | %,9.0f | %,9.0f | %,9.0f | %+,9.0f | %,12.0f".format(
-        year, ys, ye, ymax, ymin, pnl, dd))
+    val allYears = if (rows.isEmpty()) emptyList()
+      else rows.flatMap { it.second.yearlyPnL.keys }.distinct().sorted()
+    for ((label, r) in rows) {
+      println("\n=== Yearly equity breakdown — $label ===")
+      println("%-6s | %-9s | %-9s | %-9s | %-9s | %-9s | %-12s | %-12s".format(
+        "Year", "Start$", "End$", "Max$", "Min$", "PnL$", "FromStartDD$", "MaxDailyLoss$"))
+      println("-".repeat(95))
+      for (year in allYears) {
+        val pnl = r.yearlyPnL[year] ?: 0.0
+        val dd = r.yearlyDD[year] ?: 0.0
+        val ys = r.yearlyStart[year] ?: 0.0
+        val ye = r.yearlyEnd[year] ?: 0.0
+        val ymax = r.yearlyMaxEq[year] ?: 0.0
+        val ymin = r.yearlyMinEq[year] ?: 0.0
+        val mdl = r.yearlyMaxDailyLoss[year] ?: 0.0
+        println("%-6d | %,9.0f | %,9.0f | %,9.0f | %,9.0f | %+,9.0f | %,12.0f | %,12.0f".format(
+          year, ys, ye, ymax, ymin, pnl, dd, mdl))
+      }
     }
 
     // The5ers feasibility — scale linearly across position sizes.
-    // Both yearly P&L and yearly DD scale with COINS_PER_ENTRY.
-    println("\n=== the5ers feasibility per yearly window (DD limit \$10k, P1 \$8k, P2 \$5k) ===")
-    for (coins in listOf(8.0, 5.0, 3.0, 2.0, 1.5)) {
-      val scale = coins / COINS_PER_ENTRY
-      println("\n--- ${coins} ETH per entry (× $scale of baseline) ---")
-      println("%-6s | %-9s | %-9s | %-8s | %-8s | %-12s".format(
-        "Year", "P&L $", "PeakDD $", "Phase1", "Phase2", "Status"))
-      var ok1 = 0; var ok2 = 0; var bust = 0
-      for (year in allYears) {
-        val pnl = (yearlyPnL[year] ?: 0.0) * scale
-        val dd = (yearlyDD[year] ?: 0.0) * scale
-        val ddBust = dd > 10_000
-        val p1 = pnl >= 8_000 && !ddBust
-        val p2 = pnl >= 5_000 && !ddBust
-        if (p1) ok1++
-        if (p2) ok2++
-        if (ddBust) bust++
-        val status = when {
-          ddBust -> "BUSTED"
-          p1 -> "P1 ok"
-          p2 -> "P2 only"
-          else -> "miss target"
+    // Two bust conditions: total DD > $10k OR any-day floating loss > $5k.
+    for ((label, r) in rows) {
+      println("\n=== the5ers feasibility — $label (TotalDD ≤ \$10k, MaxDaily ≤ \$5k, P1 ≥ \$8k, P2 ≥ \$5k) ===")
+      for (coins in listOf(8.0, 5.0, 3.0, 2.0, 1.5)) {
+        val scale = coins / COINS_PER_ENTRY
+        println("\n--- ${coins} ETH per entry (× $scale of baseline) ---")
+        println("%-6s | %-9s | %-9s | %-10s | %-7s | %-7s | %-12s".format(
+          "Year", "P&L $", "TotalDD$", "DailyMax$", "P1", "P2", "Status"))
+        var ok1 = 0; var ok2 = 0; var bustTotal = 0; var bustDaily = 0
+        for (year in allYears) {
+          val pnl = (r.yearlyPnL[year] ?: 0.0) * scale
+          val dd = (r.yearlyDD[year] ?: 0.0) * scale
+          val mdl = (r.yearlyMaxDailyLoss[year] ?: 0.0) * scale
+          val ddBust = dd > 10_000
+          val dailyBust = mdl > 5_000
+          val anyBust = ddBust || dailyBust
+          val p1 = pnl >= 8_000 && !anyBust
+          val p2 = pnl >= 5_000 && !anyBust
+          if (p1) ok1++
+          if (p2) ok2++
+          if (ddBust) bustTotal++
+          if (dailyBust) bustDaily++
+          val status = when {
+            dailyBust && ddBust -> "BUST (both)"
+            dailyBust -> "BUST (daily)"
+            ddBust -> "BUST (total)"
+            p1 -> "P1 ok"
+            p2 -> "P2 only"
+            else -> "miss target"
+          }
+          println("%-6d | %+,9.0f | %,9.0f | %,10.0f | %-7s | %-7s | %-12s".format(
+            year, pnl, dd, mdl,
+            if (p1) "PASS" else "FAIL",
+            if (p2) "PASS" else "FAIL",
+            status))
         }
-        println("%-6d | %+,9.0f | %,9.0f | %-8s | %-8s | %-12s".format(
-          year, pnl, dd,
-          if (p1) "PASS" else "FAIL",
-          if (p2) "PASS" else "FAIL",
-          status))
+        println(" Summary: P1=$ok1/${allYears.size}, P2=$ok2/${allYears.size}, " +
+                "bustTotal=$bustTotal, bustDaily=$bustDaily")
       }
-      println(" Summary: P1 pass=$ok1/${allYears.size}, P2 pass=$ok2/${allYears.size}, busted=$bust/${allYears.size}")
     }
 
     val bnh = osr.last().close / osr.first().close
@@ -225,12 +231,13 @@ object SqueezeMomentumLeveragedTest {
     val profitDollars: Double,
     val finalBalance: Double,
     val yearlyPnL: Map<Int, Double>,
-    val yearlyDD: Map<Int, Double>,        // per-year FROM-START DD (what prop firms enforce)
-    val yearlyPeakDD: Map<Int, Double>,    // per-year peak-to-trough DD (volatility diagnostic only)
-    val yearlyStart: Map<Int, Double>,     // equity at the first bar of the year
-    val yearlyEnd: Map<Int, Double>,       // equity at the last bar of the year (or end of data)
-    val yearlyMaxEq: Map<Int, Double>,     // peak equity during the year
-    val yearlyMinEq: Map<Int, Double>,     // trough equity during the year
+    val yearlyDD: Map<Int, Double>,             // per-year FROM-START DD (max total loss vs year-open)
+    val yearlyPeakDD: Map<Int, Double>,         // per-year peak-to-trough DD (volatility diagnostic only)
+    val yearlyStart: Map<Int, Double>,          // equity at the first bar of the year
+    val yearlyEnd: Map<Int, Double>,            // equity at the last bar of the year (or end of data)
+    val yearlyMaxEq: Map<Int, Double>,          // peak equity during the year
+    val yearlyMinEq: Map<Int, Double>,          // trough equity during the year
+    val yearlyMaxDailyLoss: Map<Int, Double>,   // worst single-day floating loss in the year
   )
 
   private fun runCombined(
@@ -272,6 +279,12 @@ object SqueezeMomentumLeveragedTest {
     val yearlyMaxEq = sortedMapOf<Int, Double>()
     val yearlyMinEq = sortedMapOf<Int, Double>()
     val yearlyEndEq = sortedMapOf<Int, Double>()
+    // Daily-loss tracking (prop firm "max daily loss" rule, $5k for the5ers).
+    // Per-day open equity is captured at the first bar of each calendar day;
+    // daily loss = max(0, dayOpenEq - currentEq) at any moment that day.
+    var currentDay: java.time.LocalDate? = null
+    var dayOpenEq = STARTING_BAL
+    val yearlyMaxDailyLoss = sortedMapOf<Int, Double>()
 
     fun closePos(pos: OpenPos, price: Double): Double {
       val gross = (price - pos.entryPrice) * pos.coins * pos.side
@@ -360,6 +373,14 @@ object SqueezeMomentumLeveragedTest {
       yearlyMaxEq.merge(year, equity) { prev, cur -> max(prev, cur) }
       yearlyMinEq.merge(year, equity) { prev, cur -> min(prev, cur) }
       yearlyEndEq[year] = equity   // overwritten each bar, ends up as last-bar equity
+      // Daily-loss tracking: reset day-open equity at calendar day change.
+      val barDate = bar.openTime.atZone(ZoneOffset.UTC).toLocalDate()
+      if (currentDay == null || currentDay != barDate) {
+        currentDay = barDate
+        dayOpenEq = equity
+      }
+      val dailyLoss = (dayOpenEq - equity).coerceAtLeast(0.0)
+      yearlyMaxDailyLoss.merge(year, dailyLoss) { prev, cur -> max(prev, cur) }
 
       // 3) Feed the timeseries and read signals.
       tsm += bar
@@ -445,6 +466,7 @@ object SqueezeMomentumLeveragedTest {
       yearlyEnd = yearlyEndEq.toMap(),
       yearlyMaxEq = yearlyMaxEq.toMap(),
       yearlyMinEq = yearlyMinEq.toMap(),
+      yearlyMaxDailyLoss = yearlyMaxDailyLoss.toMap(),
     )
   }
 

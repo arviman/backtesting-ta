@@ -64,17 +64,22 @@ namespace cAlgo.Robots
         public int HtfSmaPeriod = 47;
 
         // ────── Trade Settings ──────
-        [Parameter("Trade Volume (Lots)", Group = "Trade", DefaultValue = 0.5, MinValue = 0.001, Step = 0.001)]
+        [Parameter("Trade Volume (Lots)", Group = "Trade", DefaultValue = 0.6, MinValue = 0.001, Step = 0.001)]
         public double VolumeInLots { get; set; }
 
-        [Parameter("Stop Loss (pips, floor)", Group = "Trade", DefaultValue = 47, MinValue = 1)]
+        [Parameter("Stop Loss (pips)", Group = "Trade", DefaultValue = 47, MinValue = 1)]
         public int StopLossPips { get; set; }
 
-        [Parameter("SL Lookback Bars (0 = static SL)", Group = "Trade", DefaultValue = 80, MinValue = 0, MaxValue = 500, Step = 10)]
-        public int SlLookbackBars { get; set; }
-
-        [Parameter("SL Buffer (pips)", Group = "Trade", DefaultValue = 5, MinValue = 0, MaxValue = 50, Step = 1)]
-        public int SlBufferPips { get; set; }
+        // Structural SL (look back N bars for swing low/high) is DISABLED for
+        // prop-firm use. Wider SL on retracements busts the $5k max-daily-loss
+        // rule (the5ers / FTMO) even though it's profit-positive on personal
+        // accounts. Keep at 0 unless you're trading your own capital.
+        // [Parameter("SL Lookback Bars (0 = static SL)", Group = "Trade", DefaultValue = 0, MinValue = 0, MaxValue = 500, Step = 10)]
+        // public int SlLookbackBars { get; set; }
+        private const int SlLookbackBars = 0;
+        // [Parameter("SL Buffer (pips)", Group = "Trade", DefaultValue = 5, MinValue = 0, MaxValue = 50, Step = 1)]
+        // public int SlBufferPips { get; set; }
+        private const int SlBufferPips = 5;
 
         [Parameter("TP Multiplier (× SL, 0 = off)", Group = "Trade", DefaultValue = 1.0, MinValue = 0.0, MaxValue = 5, Step = 0.1)]
         public double TpMultiplier { get; set; }
