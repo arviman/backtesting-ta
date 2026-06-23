@@ -14,6 +14,12 @@ application {
     mainClass.set("com.arviman.ta.SqueezeMomentumLeveragedTest")
 }
 
+tasks.named<JavaExec>("run") {
+    if (project.hasProperty("mainClass")) {
+        mainClass.set(project.property("mainClass") as String)
+    }
+}
+
 repositories {
     mavenCentral()
 }

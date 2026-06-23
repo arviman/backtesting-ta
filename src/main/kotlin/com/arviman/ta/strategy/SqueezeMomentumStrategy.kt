@@ -9,6 +9,8 @@ import com.arviman.ta.indicators.linearRegressionSlope
 import com.arviman.ta.indicators.lowPrice
 import com.arviman.ta.indicators.lowestValue
 import com.arviman.ta.indicators.sma
+import com.arviman.ta.indicators.standardDeviation
+import com.arviman.ta.indicators.trueRange
 import com.arviman.ta.timeseries.TimeSeries
 
 /**
@@ -19,8 +21,16 @@ import com.arviman.ta.timeseries.TimeSeries
  * fires (BB never sits inside the very narrow KC), so the entry signal
  * is the momentum histogram (`val`) crossing zero, not squeeze release.
  */
-enum class SqzEntryMode { ZeroCross, Color }
-enum class SqzExitMode { ZeroCross, Color }
+enum class SqzEntryMode {
+  ZeroCross,           // val crosses 0
+  Color,               // transition INTO lime (long) / red (short)
+  ContinuationLime,    // every bar val > 0 && rising (cTrader bot's mode)
+}
+enum class SqzExitMode {
+  ZeroCross,
+  Color,                       // first sign of decel while still on momentum side
+  ZeroCrossPlusContinuation,   // val on other side of 0 AND still moving away (cTrader's exit)
+}
 
 data class SqueezeParams(
   val bbLength: Int = 10,
@@ -31,6 +41,8 @@ data class SqueezeParams(
   val htfLength: Int = 47,
   val entryMode: SqzEntryMode = SqzEntryMode.ZeroCross,
   val exitMode: SqzExitMode = SqzExitMode.ZeroCross,
+  /** When true, entries require `sqzOff` = BB expanded outside KC (volatility expansion). */
+  val requireSqzOff: Boolean = false,
 )
 
 /**
@@ -78,21 +90,52 @@ fun makeSqueezeMomentumStrategy(
   val colorExitLong  = Signal { i -> sqzVal[i] > 0 && sqzVal[i] < sqzVal[i + 1] }
   val colorExitShort = Signal { i -> sqzVal[i] < 0 && sqzVal[i] > sqzVal[i + 1] }
 
+  // ContinuationLime = every bar that is lime (cTrader bot's entry).
+  val contEntryLong = limeNow
+  val contEntryShort = redNow
+
+  // ZeroCrossPlusContinuation = val on other side of 0 AND still moving away.
+  //   long exit:  val < 0 AND val < prev (crossed below AND falling)
+  //   short exit: val > 0 AND val > prev (crossed above AND rising)
+  val zeroPlusFallLong = Signal { i -> sqzVal[i] < 0 && sqzVal[i] < sqzVal[i + 1] }
+  val zeroPlusRiseShort = Signal { i -> sqzVal[i] > 0 && sqzVal[i] > sqzVal[i + 1] }
+
+  // Squeeze-off gate: BB has expanded outside KC (volatility expanding).
+  // Only meaningful when kcMult is wide enough that BB can actually sit
+  // inside KC; with kcMult=0.1 this is essentially always true so the
+  // gate is a no-op. With kcMult=1.4 (cTrader prop-firm config) it
+  // filters out compressed/quiet phases.
+  val sqzOffGate: Signal = if (params.requireSqzOff) {
+    val basis = close.sma(params.bbLength).cached(series)
+    val sd = close.standardDeviation(params.bbLength).cached(series)
+    val upperBB = Indicator { i -> basis[i] + params.bbMult * sd[i] }
+    val lowerBB = Indicator { i -> basis[i] - params.bbMult * sd[i] }
+    val kcMa = close.sma(params.kcLength).cached(series)
+    val rngma = series.trueRange().sma(params.kcLength).cached(series)
+    val upperKC = Indicator { i -> kcMa[i] + rngma[i] * params.kcMult }
+    val lowerKC = Indicator { i -> kcMa[i] - rngma[i] * params.kcMult }
+    Signal { i -> lowerBB[i] < lowerKC[i] && upperBB[i] > upperKC[i] }
+  } else Signal { true }
+
   val longEntry = when (params.entryMode) {
     SqzEntryMode.ZeroCross -> crossUp
     SqzEntryMode.Color -> colorEntryLong
-  } and htfBullish
+    SqzEntryMode.ContinuationLime -> contEntryLong
+  } and htfBullish and sqzOffGate
   val longExit = when (params.exitMode) {
     SqzExitMode.ZeroCross -> crossDown
     SqzExitMode.Color -> colorExitLong
+    SqzExitMode.ZeroCrossPlusContinuation -> zeroPlusFallLong
   }
   val shortEntry = when (params.entryMode) {
     SqzEntryMode.ZeroCross -> crossDown
     SqzEntryMode.Color -> colorEntryShort
-  } and htfBearish
+    SqzEntryMode.ContinuationLime -> contEntryShort
+  } and htfBearish and sqzOffGate
   val shortExit = when (params.exitMode) {
     SqzExitMode.ZeroCross -> crossUp
     SqzExitMode.Color -> colorExitShort
+    SqzExitMode.ZeroCrossPlusContinuation -> zeroPlusRiseShort
   }
 
   return if (longSide) Strategy(entrySignal = longEntry, exitSignal = longExit)
