@@ -68,7 +68,7 @@ object SqueezeMomentumLeveragedTest {
   )
 
   // Base TP ratio fixed at the winner; we're testing structural SL only.
-  private val tpRatios = listOf(1.0)
+  private val tpRatios = listOf(0.3, 0.5, 0.7, 1.0)
 
   // Lock to the winning stagger config (requireProfit on, everything else off).
   private val staggers: List<Pair<String, Stagger>> = listOf(
@@ -78,7 +78,7 @@ object SqueezeMomentumLeveragedTest {
 
   // Level 1 SL-lookback sweep. 0 = static 47-pip SL (baseline).
   // Comparing static-SL vs structural-SL to see DD impact.
-  private val slLookbackBars = listOf(0, 80)
+  private val slLookbackBars = listOf(0)   // static SL only — prop-firm config
 
   @JvmStatic
   fun main(args: Array<String>) {
