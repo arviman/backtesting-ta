@@ -8,14 +8,27 @@
 //   Squeeze params      : BB 11/2.3, KC 22/1.4 (kcMult 1.4 makes the
 //                         sqzOff gate meaningfully filter compressed phases)
 //   HTF filter          : H1 SMA(47) (same TF, acts as a fast trend bias)
-//   SL                  : 47 pips
+//   SL                  : 47 pips (floor); structural SL extends to recent
+//                         swing-low/high + buffer when farther — see below
+//   SL lookback         : 80 bars (~3.3 days on H1) — empirical winner
 //   TP multiplier       : 1.0  (TP=0.5 was unprofitable in OS testing)
 //   Max positions       : 4    (6 also works; 4 is safer)
 //   Stagger             : all OFF except RequireProfitToPyramid
 //                         (only gate that improved risk-adjusted return)
+//   Volume              : 0.5 lots (= 5 ETH on a 1lot=10ETH broker;
+//                         adjust per broker — FTMO uses 0.05, the5ers 5.0)
 //
-// Empirical winner: V1 baseline + RequireProfitToPyramid on:
-//   3yr OS profit $44k / peak DD $21k / PF 1.15 with 8 ETH per entry
+// Empirical winner (Kotlin backtest, 8 ETH per entry):
+//   V1 baseline + RequireProfitToPyramid on + structural SL lb=80:
+//   3yr OS profit $95k / peak DD $43k / PF 1.21 (vs $44k/$21k for static SL)
+//
+// Structural SL: at entry, look back N bars (default 80). For longs, find
+// the lowest low in that window; SL is placed at min(lowestLow - buffer,
+// entry - StopLossPips). For shorts, mirror with highest high. The static
+// StopLossPips acts as a floor — SL is never tighter than 47 pips.
+// Intuition: the static 47 pips was getting tagged by ETH H1 noise right
+// before reversals turned favorable. Widening to structural gives the
+// trade room to breathe through pullbacks without losing the safety net.
 //
 // Lot-size scaling notes (see ctrader/SqueezeMomentumBot.md for full table):
 //   * Personal $100k+ account                  → use 0.08 lots (FTMO) or 8 lots (the5ers) — ~$48k profit / 29% DD on $100k
@@ -51,11 +64,17 @@ namespace cAlgo.Robots
         public int HtfSmaPeriod = 47;
 
         // ────── Trade Settings ──────
-        [Parameter("Trade Volume (Lots)", Group = "Trade", DefaultValue = 0.8, MinValue = 0.001, Step = 0.001)]
+        [Parameter("Trade Volume (Lots)", Group = "Trade", DefaultValue = 0.5, MinValue = 0.001, Step = 0.001)]
         public double VolumeInLots { get; set; }
 
-        [Parameter("Stop Loss (pips)", Group = "Trade", DefaultValue = 47, MinValue = 1)]
+        [Parameter("Stop Loss (pips, floor)", Group = "Trade", DefaultValue = 47, MinValue = 1)]
         public int StopLossPips { get; set; }
+
+        [Parameter("SL Lookback Bars (0 = static SL)", Group = "Trade", DefaultValue = 80, MinValue = 0, MaxValue = 500, Step = 10)]
+        public int SlLookbackBars { get; set; }
+
+        [Parameter("SL Buffer (pips)", Group = "Trade", DefaultValue = 5, MinValue = 0, MaxValue = 50, Step = 1)]
+        public int SlBufferPips { get; set; }
 
         [Parameter("TP Multiplier (× SL, 0 = off)", Group = "Trade", DefaultValue = 1.0, MinValue = 0.0, MaxValue = 5, Step = 0.1)]
         public double TpMultiplier { get; set; }
@@ -161,7 +180,8 @@ namespace cAlgo.Robots
                 {
                     if (IsDistanceValid(TradeType.Buy) && IsPyramidProfitable(TradeType.Buy))
                     {
-                        int dynamicSlPips = Math.Max(1, StopLossPips + (openBuys * SlStaggerPips));
+                        int baseSlPips = Math.Max(1, StopLossPips + (openBuys * SlStaggerPips));
+                        int dynamicSlPips = ResolveStructuralSlPips(TradeType.Buy, baseSlPips);
                         double dynamicTpMult = Math.Max(0, TpMultiplier + (openBuys * TpStaggerMultiplier));
                         double? dynamicTpPips = dynamicTpMult > 0 ? (double?)(dynamicSlPips * dynamicTpMult) : null;
 
@@ -178,7 +198,8 @@ namespace cAlgo.Robots
                 {
                     if (IsDistanceValid(TradeType.Sell) && IsPyramidProfitable(TradeType.Sell))
                     {
-                        int dynamicSlPips = Math.Max(1, StopLossPips + (openSells * SlStaggerPips));
+                        int baseSlPips = Math.Max(1, StopLossPips + (openSells * SlStaggerPips));
+                        int dynamicSlPips = ResolveStructuralSlPips(TradeType.Sell, baseSlPips);
                         double dynamicTpMult = Math.Max(0, TpMultiplier + (openSells * TpStaggerMultiplier));
                         double? dynamicTpPips = dynamicTpMult > 0 ? (double?)(dynamicSlPips * dynamicTpMult) : null;
 
@@ -210,6 +231,42 @@ namespace cAlgo.Robots
         }
 
         // ────── Helpers ──────
+
+        /// <summary>
+        /// Returns SL distance in pips: max(baseSlPips, distance from current
+        /// price to the lookback low (long) / high (short) + buffer). The
+        /// static base acts as a floor — SL never tighter than baseSlPips.
+        /// </summary>
+        private int ResolveStructuralSlPips(TradeType type, int baseSlPips)
+        {
+            if (SlLookbackBars <= 0) return baseSlPips;
+
+            int last = Bars.Count - 1;                       // current (forming) bar
+            int from = Math.Max(0, last - SlLookbackBars);   // window start
+            // window is [from .. last-1] (exclude the current bar)
+            if (from >= last) return baseSlPips;
+
+            double currentPrice = (type == TradeType.Buy) ? Symbol.Ask : Symbol.Bid;
+            double structuralPrice;
+            if (type == TradeType.Buy)
+            {
+                double minLow = double.MaxValue;
+                for (int i = from; i < last; i++)
+                    if (Bars.LowPrices[i] < minLow) minLow = Bars.LowPrices[i];
+                structuralPrice = minLow;
+                double distPips = (currentPrice - structuralPrice) / Symbol.PipSize + SlBufferPips;
+                return Math.Max(baseSlPips, (int)Math.Round(distPips));
+            }
+            else
+            {
+                double maxHigh = double.MinValue;
+                for (int i = from; i < last; i++)
+                    if (Bars.HighPrices[i] > maxHigh) maxHigh = Bars.HighPrices[i];
+                structuralPrice = maxHigh;
+                double distPips = (structuralPrice - currentPrice) / Symbol.PipSize + SlBufferPips;
+                return Math.Max(baseSlPips, (int)Math.Round(distPips));
+            }
+        }
 
         private bool IsDistanceValid(TradeType type)
         {

@@ -43,8 +43,10 @@ asset / period.
 | Squeeze | `KC MultFactor` | 1.4 | LazyBear default 1.5; tighter for more sqzOff signals |
 | HTF | `HigherTimeframe` | H1 | Same TF as trading; acts as a long-MA trend bias |
 | HTF | `HtfSmaPeriod` | 47 | |
-| Trade | `Trade Volume (Lots)` | 0.8 | Broker-dependent: 0.8 lots = 8 ETH on the5ers convention |
-| Trade | `Stop Loss (pips)` | 47 | Fixed pip distance |
+| Trade | `Trade Volume (Lots)` | 0.5 | Broker-dependent. FTMO: 0.05 = 5 ETH. the5ers: 5.0 = 5 ETH. Set to give ~5 ETH per entry |
+| Trade | `Stop Loss (pips)` (floor) | 47 | Acts as floor; structural SL extends wider when prior swing is farther |
+| Trade | `SL Lookback Bars` | 80 | Bars to scan for structural swing low/high. 0 = static SL only |
+| Trade | `SL Buffer (pips)` | 5 | Pad past structural level to avoid pixel-hunt stops |
 | Trade | `TP Multiplier` | 1.0 | TP = SL × multiplier. **TP=0.5 was unprofitable** in OS backtest. |
 | Trade | `Max Open Positions` | 4 | 6 also works; 4 is safer |
 | Pyramiding | `MinEntryDistancePips` | 0 | Off — backtest showed no benefit |
@@ -54,40 +56,67 @@ asset / period.
 
 ## Empirical results (3-year ETHUSD H1 OS slice)
 
-Best config (V1 baseline + RequireProfitToPyramid on, all other stagger off):
+### Final winner: V1 + profit gate + structural SL (lb=80), 5 ETH per entry
+
+```
+trades         : 2,734
+win rate       : 39.2%
+profit factor  : 1.21
+profit (abs)   : +$59,400
+peak DD (abs)  : $26,862
+profit/DD      : 2.21
+```
+
+vs the static-SL baseline (also at 5 ETH per entry):
 
 ```
 trades         : 3,322
 win rate       : 48.0%
 profit factor  : 1.15
-profit (abs)   : +$44,116
-peak DD (abs)  : $21,457
+profit (abs)   : +$27,572
+peak DD (abs)  : $13,410
+profit/DD      : 2.06
 ```
 
-Because position sizing is **fixed lots** (not balance-based), the
-absolute dollar profit and DD are invariant of starting balance. Only
-the percentages scale:
+Structural SL more than doubles absolute profit while keeping the same
+risk-adjusted ratio. The fewer trades + lower win rate are expected:
+wider SL means trades that would have stopped at 47 pips now survive
+through pullbacks; more catch real reversals; the rest cost more when
+they do lose.
+
+### Account scaling (fixed-lot → absolute $ invariant)
 
 | Account size | profit% | DD% | Verdict |
 |---|---|---|---|
-| $5,000 | 882% | 429% | Blows up (DD > account) |
-| $13,000 | 339% | 165% | Blows up |
-| $50,000 | 88% | 43% | Survives but ugly |
-| $100,000 | 44% | 21.5% | Fails FTMO 10% ceiling |
-| $200,000 | 22% | 10.7% | Just over FTMO ceiling |
-| $300,000 | 14.7% | 7.2% | **Passes FTMO** ✓ |
+| $50,000 | 119% | 54% | Blows up |
+| $100,000 | 59% | 27% | Fails FTMO 10% ceiling |
+| $200,000 | 30% | 13.4% | Still over FTMO |
+| $300,000 | 20% | 9.0% | **Passes FTMO** ✓ |
+
+### Yearly P&L (5 ETH per entry, structural SL lb=80)
+
+```
+2022: +$16,602
+2023:  -$3,591  (mild down year)
+2024: +$33,888  (big year)
+2025: +$12,501
+```
+
+Every year except 2023 is positive; 2024 was the big year (heavy ETH
+trending). Structural SL helps most in trending years.
 
 ## Sizing for FTMO 10% DD ceiling
 
-To pass FTMO ($100k account, 10% total DD ceiling) at this strategy's
-edge, scale the volume down ~3×:
+To pass FTMO ($100k account, 10% total DD ceiling), scale volume down
+to ~2 ETH per entry (current best $26.8k DD on 5 ETH → ~$10.7k on 2 ETH
+= 10.7% of $100k, right at ceiling):
 
 ```
-Trade Volume (Lots) = 0.03  (= 3 ETH per entry on FTMO's 100 ETH/lot)
+Trade Volume (Lots) = 0.02  (= 2 ETH per entry on FTMO's 100 ETH/lot)
 ```
 
-Expected: ~$16k profit / ~$8k DD over 3yr → 16% profit / 8% DD on $100k.
-Passes ceiling with room to spare; profit target hit in ~6 months on average.
+Expected: ~$24k profit / ~$11k DD over 3yr → 24% profit / 11% DD on $100k.
+Borderline on ceiling but profit-target friendly.
 
 ## Sizing for the5ers ($5-10k accounts)
 

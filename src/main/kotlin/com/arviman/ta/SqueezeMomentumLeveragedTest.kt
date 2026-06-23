@@ -9,6 +9,7 @@ import com.arviman.ta.timeseries.Bar
 import com.arviman.ta.timeseries.TimeSeriesManager
 import com.arviman.ta.timeseries.UnstablePeriodException
 import com.arviman.ta.timeseries.readCsvBars
+import java.time.ZoneOffset
 import kotlin.math.max
 import kotlin.math.min
 
@@ -40,7 +41,7 @@ object SqueezeMomentumLeveragedTest {
   // cTrader uses fixed lots, not fixed notional. Match that:
   // 0.8 lots × 10 ETH/lot = 8 ETH per entry, regardless of ETH price.
   // At $47 SL × 8 ETH = ~$376 per trade SL (matches user's "$400" report).
-  private const val COINS_PER_ENTRY = 8.0
+  private const val COINS_PER_ENTRY = 5.0
   private const val SL_ABS_PTS = 47.0
   private const val PYRAMID = 4
   private const val FEE = 0.0004
@@ -66,17 +67,18 @@ object SqueezeMomentumLeveragedTest {
     Variant("D ctrader-rep  ", SqzEntryMode.ContinuationLime, SqzExitMode.ZeroCrossPlusContinuation),
   )
 
-  // Base TP ratios to sweep alongside the stagger multiplier.
-  private val tpRatios = listOf(0.5, 0.7, 1.0)
+  // Base TP ratio fixed at the winner; we're testing structural SL only.
+  private val tpRatios = listOf(1.0)
 
-  // Test the requireProfitToPyramid gate in isolation (all other stagger off).
-  // Baseline = V1 bot (no stagger at all). Compare with just-profit-gate.
+  // Lock to the winning stagger config (requireProfit on, everything else off).
   private val staggers: List<Pair<String, Stagger>> = listOf(
-    "V1 baseline     " to Stagger(minEntryDistancePts = 0.0, requireProfit = false,
-                                  slStaggerPts = 0.0, tpStaggerMult = 0.0),
-    "V1 + profit gate" to Stagger(minEntryDistancePts = 0.0, requireProfit = true,
-                                  slStaggerPts = 0.0, tpStaggerMult = 0.0),
+    "profit gate ON" to Stagger(minEntryDistancePts = 0.0, requireProfit = true,
+                                slStaggerPts = 0.0, tpStaggerMult = 0.0),
   )
+
+  // Level 1 SL-lookback sweep. 0 = static 47-pip SL (baseline).
+  // Focus on the winner (80) plus neighbours for confidence.
+  private val slLookbackBars = listOf(0, 50, 80, 100)
 
   @JvmStatic
   fun main(args: Array<String>) {
@@ -94,12 +96,17 @@ object SqueezeMomentumLeveragedTest {
     for ((stagLabel, stag) in staggers) {
       for (v in variants) {
         for (tp in tpRatios) {
-          val r = runCombined(osr, v, tp, stag)
-          val label = "$stagLabel ${v.label} tp=$tp"
-          println(row(label, r))
-          rows += label to r
+          for (slLb in slLookbackBars) {
+            val r = runCombined(osr, v, tp, stag,
+              tpLookbackBars = 0, slLookbackBars = slLb)
+            val slLabel = if (slLb == 0) "SL static  " else "SL lb=%-3d ".format(slLb)
+            val label = "$stagLabel $slLabel tp=$tp"
+            println(row(label, r))
+            rows += label to r
+          }
+          println()
         }
-        println()
+        println("-".repeat(120))
       }
       println("=".repeat(120))
     }
@@ -130,6 +137,23 @@ object SqueezeMomentumLeveragedTest {
       ))
     }
 
+    // ── Yearly breakdown for the best config ──
+    println("\n=== Yearly P&L breakdown for best config (${best.first}) ===")
+    val baseBalance = 13_000.0
+    var runningBal = baseBalance
+    println("%-6s | %-14s | %-14s | %-14s | %-14s".format("Year", "PnL", "Cumulative PnL", "Year-end Balance", "Return %"))
+    println("-".repeat(70))
+    val yearlyPnL = best.second.yearlyPnL
+    val allYears = if (yearlyPnL.isEmpty()) emptyList()
+      else (yearlyPnL.keys.min()..yearlyPnL.keys.max()).toList()
+    for (year in allYears) {
+      val pnl = yearlyPnL[year] ?: 0.0
+      runningBal += pnl
+      val cumPnL = runningBal - baseBalance
+      val retPct = if (baseBalance > 0) 100.0 * cumPnL / baseBalance else 0.0
+      println("%-6d | %+,14.0f | %+,14.0f | %,14.0f | %+,13.1f%%".format(year, pnl, cumPnL, runningBal, retPct))
+    }
+
     val bnh = osr.last().close / osr.first().close
     println("\nBuy & hold OS: %.2fx (%+.1f%%)".format(bnh, 100.0 * (bnh - 1.0)))
   }
@@ -154,12 +178,21 @@ object SqueezeMomentumLeveragedTest {
     val profitFactor: Double,
     val profitPct: Double,
     val maxDD: Double,
-    val maxDDDollars: Double,    // absolute peak-to-trough drawdown
-    val profitDollars: Double,   // absolute profit in dollars (fixed-coin → invariant of start balance)
+    val maxDDDollars: Double,
+    val profitDollars: Double,
     val finalBalance: Double,
+    val yearlyPnL: Map<Int, Double>,
   )
 
-  private fun runCombined(bars: List<Bar>, v: Variant, tpRatio: Double, stag: Stagger): CombinedReport {
+  private fun runCombined(
+    bars: List<Bar>,
+    v: Variant,
+    tpRatio: Double,
+    stag: Stagger,
+    tpLookbackBars: Int = 0,    // 0 = static TP only (Level 0); >0 = Level 1 structural floor
+    slLookbackBars: Int = 0,    // 0 = static SL only; >0 = structural SL (below recent low / above recent high)
+    slBufferPts: Double = 5.0,  // pad past the structural level to avoid pixel-hunt stops
+  ): CombinedReport {
     val tsm = TimeSeriesManager(bars[0].timeFrame)
     val requireSqzOff = v.entryMode == SqzEntryMode.ContinuationLime  // cTrader replica gates by sqzOff
     val params = SqueezeParams(
@@ -177,26 +210,39 @@ object SqueezeMomentumLeveragedTest {
     var maxDDDollars = 0.0
     val positions = mutableListOf<OpenPos>()
     val pnls = mutableListOf<Double>()
+    val yearlyPnL = sortedMapOf<Int, Double>()
 
-    fun closePos(pos: OpenPos, price: Double) {
+    fun closePos(pos: OpenPos, price: Double): Double {
       val gross = (price - pos.entryPrice) * pos.coins * pos.side
       val exitFee = price * pos.coins * FEE
       val net = gross - exitFee
       balance += net
       pnls += net
+      return net
     }
 
-    fun openPos(side: Int, price: Double) {
+    fun openPos(side: Int, price: Double, structuralHi: Double, structuralLo: Double): Double {
       val sameSideCount = positions.count { it.side == side }
-      val slPts = max(1.0, SL_ABS_PTS + sameSideCount * stag.slStaggerPts)
+      val staticSlPts = max(1.0, SL_ABS_PTS + sameSideCount * stag.slStaggerPts)
+      // Level 1 structural SL: floor at static, widen to past low/high + buffer if farther.
+      val slPts = if (slLookbackBars > 0) {
+        if (side > 0) max(staticSlPts, price - structuralLo + slBufferPts)
+        else          max(staticSlPts, structuralHi - price + slBufferPts)
+      } else staticSlPts
       val tpMult = max(0.0, tpRatio + sameSideCount * stag.tpStaggerMult)
-      val tpPts = slPts * tpMult
+      val staticTpPts = slPts * tpMult
+      // Level 1 structural TP: floor at static, raise to recent high/low if farther.
+      val tpPts = if (tpLookbackBars > 0) {
+        if (side > 0) max(staticTpPts, structuralHi - price)
+        else          max(staticTpPts, price - structuralLo)
+      } else staticTpPts
       val coins = COINS_PER_ENTRY                                    // fixed-lots model
       val slPrice = if (side > 0) price - slPts else price + slPts
       val tpPrice = if (side > 0) price + tpPts else price - tpPts
       val entryFee = price * coins * FEE
       balance -= entryFee
       positions += OpenPos(side, coins, price, slPrice, tpPrice)
+      return entryFee
     }
 
     /** cTrader's `IsDistanceValid` — newest entry on same side must be ≥ minDist away. */
@@ -216,7 +262,7 @@ object SqueezeMomentumLeveragedTest {
       return unrealized > 0
     }
 
-    for (bar in bars) {
+    for ((bIdx, bar) in bars.withIndex()) {
       val close = bar.close
       val high = bar.high
       val low = bar.low
@@ -227,8 +273,8 @@ object SqueezeMomentumLeveragedTest {
         val pos = iter.next()
         val hitSL = if (pos.side > 0) low <= pos.slPrice else high >= pos.slPrice
         val hitTP = if (pos.side > 0) high >= pos.tpPrice else low <= pos.tpPrice
-        if (hitSL) { closePos(pos, pos.slPrice); iter.remove() }
-        else if (hitTP) { closePos(pos, pos.tpPrice); iter.remove() }
+        if (hitSL) { val net = closePos(pos, pos.slPrice); iter.remove(); yearlyPnL.merge(bar.openTime.atZone(ZoneOffset.UTC).year, net, Double::plus) }
+        else if (hitTP) { val net = closePos(pos, pos.tpPrice); iter.remove(); yearlyPnL.merge(bar.openTime.atZone(ZoneOffset.UTC).year, net, Double::plus) }
       }
 
       // 2) Mark to market and update drawdown.
@@ -247,13 +293,22 @@ object SqueezeMomentumLeveragedTest {
       val longSig = try { longStrategy[0] } catch (_: UnstablePeriodException) { SignalType.NO_OP }
       val shortSig = try { shortStrategy[0] } catch (_: UnstablePeriodException) { SignalType.NO_OP }
 
+      // Structural hi/lo over the prior max(tpLookback, slLookback) bars.
+      val lookback = max(tpLookbackBars, slLookbackBars)
+      val (structuralHi, structuralLo) = if (lookback > 0 && bIdx > 0) {
+        val from = max(0, bIdx - lookback)
+        val window = bars.subList(from, bIdx)
+        window.maxOf { it.high } to window.minOf { it.low }
+      } else Double.NEGATIVE_INFINITY to Double.POSITIVE_INFINITY
+
       // 4) cTrader order: entries FIRST (net mode — skip if opposite side has positions).
       if (longSig === SignalType.ENTRY) {
         val noOpposite = positions.none { it.side < 0 }
         val sameSide = positions.count { it.side > 0 }
         if (noOpposite && sameSide < PYRAMID && balance > 0
             && distanceOk(+1, close) && profitOk(+1, close)) {
-          openPos(+1, close)
+          val fee = openPos(+1, close, structuralHi, structuralLo)
+          yearlyPnL.merge(bar.openTime.atZone(ZoneOffset.UTC).year, -fee, Double::plus)
         }
       }
       if (shortSig === SignalType.ENTRY) {
@@ -261,24 +316,29 @@ object SqueezeMomentumLeveragedTest {
         val sameSide = positions.count { it.side < 0 }
         if (noOpposite && sameSide < PYRAMID && balance > 0
             && distanceOk(-1, close) && profitOk(-1, close)) {
-          openPos(-1, close)
+          val fee = openPos(-1, close, structuralHi, structuralLo)
+          yearlyPnL.merge(bar.openTime.atZone(ZoneOffset.UTC).year, -fee, Double::plus)
         }
       }
 
       // 5) Then exits (same-direction only).
       if (longSig === SignalType.EXIT) {
-        positions.filter { it.side > 0 }.forEach { closePos(it, close) }
+        positions.filter { it.side > 0 }.forEach { val net = closePos(it, close); yearlyPnL.merge(bar.openTime.atZone(ZoneOffset.UTC).year, net, Double::plus) }
         positions.removeAll { it.side > 0 }
       }
       if (shortSig === SignalType.EXIT) {
-        positions.filter { it.side < 0 }.forEach { closePos(it, close) }
+        positions.filter { it.side < 0 }.forEach { val net = closePos(it, close); yearlyPnL.merge(bar.openTime.atZone(ZoneOffset.UTC).year, net, Double::plus) }
         positions.removeAll { it.side < 0 }
       }
     }
 
     // 6) Force-close anything left at the final close.
     val lastClose = bars.last().close
-    positions.forEach { closePos(it, lastClose) }
+    val finalYear = bars.last().openTime.atZone(ZoneOffset.UTC).year
+    positions.forEach {
+      val net = closePos(it, lastClose)
+      yearlyPnL.merge(finalYear, net, Double::plus)
+    }
     positions.clear()
 
     val wins = pnls.filter { it > 0 }
@@ -303,6 +363,7 @@ object SqueezeMomentumLeveragedTest {
       profitPct = (balance - STARTING_BAL) / STARTING_BAL,
       maxDD = maxDD,
       finalBalance = balance,
+      yearlyPnL = yearlyPnL.toMap(),
     )
   }
 
