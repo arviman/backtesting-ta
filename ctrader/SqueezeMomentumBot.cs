@@ -83,19 +83,23 @@ namespace cAlgo.Robots
         public int MaxPositions { get; set; }
 
         // ────── Pyramiding gates ──────
-        // Backtest: MinEntryDistance, SlStagger, TpStagger all add cost
-        // without payoff. Default them OFF. RequireProfit is the one keeper.
-        [Parameter("Min Distance Between Entries (pips)", Group = "Pyramiding", DefaultValue = 0, MinValue = 0)]
-        public int MinEntryDistancePips { get; set; }
+        // Backtest: MinEntryDistance, SlStagger, TpStagger all hurt risk-adjusted
+        // return. Hidden from the optimizer (kept as const 0); only the profit
+        // gate is exposed as it's the one improvement worth keeping ON.
+        // [Parameter("Min Distance Between Entries (pips)", Group = "Pyramiding", DefaultValue = 0, MinValue = 0)]
+        // public int MinEntryDistancePips { get; set; }
+        private const int MinEntryDistancePips = 0;
 
         [Parameter("Require Profit to Pyramid", Group = "Pyramiding", DefaultValue = true)]
         public bool RequireProfitToPyramid { get; set; }
 
-        [Parameter("SL Stagger per Position (pips)", Group = "Pyramiding", DefaultValue = 0, MinValue = -50, MaxValue = 50)]
-        public int SlStaggerPips { get; set; }
+        // [Parameter("SL Stagger per Position (pips)", Group = "Pyramiding", DefaultValue = 0, MinValue = -50, MaxValue = 50)]
+        // public int SlStaggerPips { get; set; }
+        private const int SlStaggerPips = 0;
 
-        [Parameter("TP Multiplier Stagger per Pos", Group = "Pyramiding", DefaultValue = 0.0, MinValue = -5, MaxValue = 5)]
-        public double TpStaggerMultiplier { get; set; }
+        // [Parameter("TP Multiplier Stagger per Pos", Group = "Pyramiding", DefaultValue = 0.0, MinValue = -5, MaxValue = 5)]
+        // public double TpStaggerMultiplier { get; set; }
+        private const double TpStaggerMultiplier = 0.0;
 
         // ────── Trailing Stop (off by default) ──────
         public bool UseTrailingStop = false;
