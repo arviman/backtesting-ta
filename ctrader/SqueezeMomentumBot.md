@@ -4,6 +4,21 @@ C# port of LazyBear's "Squeeze Momentum Indicator" wrapped as a strategy.
 Designed for ETHUSD H1. Defaults reflect the Kotlin backtest findings on
 71k bars of ETHUSD H1 (3yr OS slice).
 
+## Two variants
+
+| File | Use when | Structural SL | Default volume |
+|---|---|---|---|
+| `SqueezeMomentumBotEval.cs` | Evaluation phases (the5ers / FTMO with $5k max-daily rule) | hard-disabled | 0.6 lots (6 ETH/entry) |
+| `SqueezeMomentumBotFunded.cs` | Funded accounts or personal capital | enabled (lb=80) | 0.5 lots (5 ETH/entry) |
+
+Both share identical squeeze, HTF, and momentum logic; the funded bot
+exposes `SlLookbackBars` and `SlBufferPips` as parameters and ships with
+structural SL on by default. Switch bots when you transition from eval
+to funded.
+
+Position labels differ (`SQZE_*` for eval, `SQZF_*` for funded) so the
+two can safely co-exist on one account if you ever need to.
+
 ## Strategy in one paragraph
 
 The bot computes Bollinger Bands and Keltner Channels on every bar. The
@@ -170,7 +185,8 @@ any pyramid depth. Either:
 
 ## Files
 
-- `SqueezeMomentumBot.cs` — the cBot
+- `SqueezeMomentumBotEval.cs` — eval-phase cBot (static SL only)
+- `SqueezeMomentumBotFunded.cs` — funded / personal cBot (structural SL on)
 - `SqueezeMomentumBot.md` — this file
 - Kotlin reference port: `src/main/kotlin/com/arviman/ta/strategy/SqueezeMomentumStrategy.kt`
 - Pine version: `pinescripts/SqueezeMomentumStrategy.pine`

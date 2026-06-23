@@ -1,39 +1,34 @@
-// SqueezeMomentumBot — cTrader Algo C# cBot
+// SqueezeMomentumBotEval — cTrader Algo C# cBot (EVALUATION variant)
 //
-// Port of LazyBear's Squeeze Momentum indicator into a trading bot.
-// Designed for ETHUSD H1.
+// Port of LazyBear's Squeeze Momentum indicator into a trading bot,
+// configured for the5ers / FTMO **evaluation phases** with the strict
+// $5k max-daily-loss + $10k max-total-loss rules.
 //
-// Defaults reflect the Kotlin backtest findings on ETHUSD H1 OS (3yr):
+// Designed for ETHUSD H1. Structural SL is hard-disabled (the funded
+// variant SqueezeMomentumBotFunded.cs enables it). Use this bot through
+// phase 1 and phase 2; once funded, switch to the funded bot.
 //
-//   Squeeze params      : BB 11/2.3, KC 22/1.4 (kcMult 1.4 makes the
-//                         sqzOff gate meaningfully filter compressed phases)
-//   HTF filter          : H1 SMA(47) (same TF, acts as a fast trend bias)
-//   SL                  : 47 pips (floor); structural SL extends to recent
-//                         swing-low/high + buffer when farther — see below
-//   SL lookback         : 80 bars (~3.3 days on H1) — empirical winner
+// Defaults (Kotlin backtest winners for the5ers eval):
+//   Squeeze params      : BB 11/2.3, KC 22/1.4
+//   HTF filter          : H1 SMA(47) (same TF, acts as fast trend bias)
+//   SL                  : 47 pips static (structural SL OFF — see below)
 //   TP multiplier       : 1.0  (TP=0.5 was unprofitable in OS testing)
-//   Max positions       : 4    (6 also works; 4 is safer)
+//   Max positions       : 4
+//   Volume              : 0.6 lots (= 6 ETH on a 1lot=10ETH broker)
 //   Stagger             : all OFF except RequireProfitToPyramid
-//                         (only gate that improved risk-adjusted return)
-//   Volume              : 0.5 lots (= 5 ETH on a 1lot=10ETH broker;
-//                         adjust per broker — FTMO uses 0.05, the5ers 5.0)
 //
-// Empirical winner (Kotlin backtest, 8 ETH per entry):
-//   V1 baseline + RequireProfitToPyramid on + structural SL lb=80:
-//   3yr OS profit $95k / peak DD $43k / PF 1.21 (vs $44k/$21k for static SL)
+// Why no structural SL on the eval bot:
+//   Wider structural SL catches more reversal profits BUT lets positions
+//   ride deeper retracements. At 5+ ETH per entry the daily floating
+//   loss exceeds the5ers' $5k rule. Static SL keeps max daily loss
+//   below $2.7k even at 8 ETH, leaving comfortable margin.
 //
-// Structural SL: at entry, look back N bars (default 80). For longs, find
-// the lowest low in that window; SL is placed at min(lowestLow - buffer,
-// entry - StopLossPips). For shorts, mirror with highest high. The static
-// StopLossPips acts as a floor — SL is never tighter than 47 pips.
-// Intuition: the static 47 pips was getting tagged by ETH H1 noise right
-// before reversals turned favorable. Widening to structural gives the
-// trade room to breathe through pullbacks without losing the safety net.
-//
-// Lot-size scaling notes (see ctrader/SqueezeMomentumBot.md for full table):
-//   * Personal $100k+ account                  → use 0.08 lots (FTMO) or 8 lots (the5ers) — ~$48k profit / 29% DD on $100k
-//   * FTMO 100k eval (10% DD ceiling)          → use ~0.03 lots (= 3 ETH) to fit under ceiling
-//   * Smaller accounts (< $30k)                → don't use this strategy as-is; too risky
+// Eval-phase backtest (3yr ETHUSD H1 OS at 6 ETH per entry, static SL):
+//   2022: +$19,415 / FromStartDD $10    / DailyMax $1,435 → PASS BOTH
+//   2023:  -$6,997 / FromStartDD $9,616 / DailyMax $1,390 → miss, SURVIVE
+//   2024: +$12,817 / FromStartDD $2,874 / DailyMax $2,042 → PASS BOTH
+//   2025:  +$7,852 / FromStartDD   $970 / DailyMax $1,994 → PASS BOTH
+//   3 of 4 yearly windows pass both phases. 0 of 4 bust either rule.
 
 using System;
 using cAlgo.API;
@@ -43,7 +38,7 @@ using cAlgo.API.Internals;
 namespace cAlgo.Robots
 {
     [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
-    public class SqueezeMomentumBot : Robot
+    public class SqueezeMomentumBotEval : Robot
     {
         // ────── Squeeze (LazyBear formula) ──────
         [Parameter("BB Length", Group = "Squeeze", DefaultValue = 11, MinValue = 5, MaxValue = 50, Step = 1)]
@@ -143,7 +138,7 @@ namespace cAlgo.Robots
             _htfBars = MarketData.GetBars(htfTimeFrame, SymbolName);
 
             double? tpPips = TpMultiplier > 0 ? (double?)(StopLossPips * TpMultiplier) : null;
-            Print("SqueezeMomentumBot started – {0} | HTF: {1} SMA({2}) | SL: {3} pips | TP: {4} | maxPos {5} | requireProfit {6}",
+            Print("SqueezeMomentumBotEval started – {0} | HTF: {1} SMA({2}) | SL: {3} pips | TP: {4} | maxPos {5} | requireProfit {6}",
                   Symbol.Name, htfTimeFrame, HtfSmaPeriod, StopLossPips,
                   tpPips.HasValue ? tpPips.Value.ToString("F1") + " pips" : "off",
                   MaxPositions, RequireProfitToPyramid);
@@ -215,7 +210,7 @@ namespace cAlgo.Robots
                         double? dynamicTpPips = dynamicTpMult > 0 ? (double?)(dynamicSlPips * dynamicTpMult) : null;
 
                         double volume = Symbol.QuantityToVolumeInUnits(VolumeInLots);
-                        var result = ExecuteMarketOrder(TradeType.Buy, SymbolName, volume, "SQZ_LONG",
+                        var result = ExecuteMarketOrder(TradeType.Buy, SymbolName, volume, "SQZE_LONG",
                                                        dynamicSlPips, dynamicTpPips);
                         if (result.IsSuccessful && UseTrailingStop)
                             result.Position.ModifyTrailingStop(true);
@@ -233,7 +228,7 @@ namespace cAlgo.Robots
                         double? dynamicTpPips = dynamicTpMult > 0 ? (double?)(dynamicSlPips * dynamicTpMult) : null;
 
                         double volume = Symbol.QuantityToVolumeInUnits(VolumeInLots);
-                        var result = ExecuteMarketOrder(TradeType.Sell, SymbolName, volume, "SQZ_SHORT",
+                        var result = ExecuteMarketOrder(TradeType.Sell, SymbolName, volume, "SQZE_SHORT",
                                                        dynamicSlPips, dynamicTpPips);
                         if (result.IsSuccessful && UseTrailingStop)
                             result.Position.ModifyTrailingStop(true);
@@ -337,7 +332,7 @@ namespace cAlgo.Robots
             foreach (var pos in Positions)
             {
                 if (pos.SymbolName != SymbolName) continue;
-                if (!pos.Label.StartsWith("SQZ_")) continue;
+                if (!pos.Label.StartsWith("SQZE_")) continue;
 
                 if (pos.TradeType == TradeType.Buy)
                 {
@@ -479,7 +474,7 @@ namespace cAlgo.Robots
 
         protected override void OnStop()
         {
-            Print("SqueezeMomentumBot stopped.");
+            Print("SqueezeMomentumBotEval stopped.");
         }
     }
 }
