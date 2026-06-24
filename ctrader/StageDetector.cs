@@ -10,8 +10,11 @@
 //
 // Outputs:
 //   SMA10/SMA20/SMA30/SMA40 lines (the ribbon).
-//   Stage : numeric 1..4 (NaN before warm-up). Consumable by other indicators
-//           or cBots via Indicators.GetIndicator<StageDetector>(...).Stage.
+//   Stage : numeric 1..4 (NaN before warm-up). NOT plotted on the chart —
+//           the [Output] attribute is omitted because a 1..4 line crushes
+//           the price axis on low-priced symbols (e.g. CADCHF ≈ 0.6).
+//           Still accessible from other indicators / cBots via
+//           Indicators.GetIndicator<StageDetector>(...).Stage.
 //
 // Indexing: cTrader Indicators run forward. Calculate(int index) is invoked
 // per bar oldest→newest, then re-invoked on the in-flight (last) bar each
@@ -45,14 +48,15 @@ namespace cAlgo.Indicators
         [Output("SMA 40", LineColor = "Crimson",      PlotType = PlotType.Line, Thickness = 2)]
         public IndicatorDataSeries Sma40 { get; set; }
 
-        [Output("Stage", LineColor = "Transparent")]
-        public IndicatorDataSeries Stage { get; set; }
+        // Not marked [Output] — see header comment.
+        public IndicatorDataSeries Stage { get; private set; }
 
         private SimpleMovingAverage _f, _m1, _m2, _s;
         private int _lastDirectional; // 0 = none, 2 = Stage 2, 4 = Stage 4
 
         protected override void Initialize()
         {
+            Stage = CreateDataSeries();
             _f  = Indicators.SimpleMovingAverage(Bars.ClosePrices, FastLen);
             _m1 = Indicators.SimpleMovingAverage(Bars.ClosePrices, Mid1Len);
             _m2 = Indicators.SimpleMovingAverage(Bars.ClosePrices, Mid2Len);
