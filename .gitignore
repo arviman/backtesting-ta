@@ -43,3 +43,6 @@ out/
 ### Claude / tooling ###
 .claude/
 .DS_Store
+
+### no-mistakes runtime state ###
+.atl/
