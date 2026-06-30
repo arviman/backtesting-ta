@@ -45,6 +45,9 @@ object CrossComparison {
   // Buffer scaled per asset (10 NQ pts ≈ 0.05% of price; symmetric for ETH).
   private const val NQ_BUFFER = 10.0
   private const val ETH_BUFFER = 1.5    // ~0.05% of $3000 ETH
+  // Pyramiding levelled across both strategies for a fairer comparison.
+  // Both: max 4 same-direction concurrent positions, profit-gated.
+  private const val PYRAMID = 4
 
   // Squeeze params from SqueezeMomentumTest.kt (ETH-tuned baseline).
   private val SQZ_PARAMS = SqueezeParams(
@@ -89,6 +92,7 @@ object CrossComparison {
       lookback = LOOKBACK, bufferPts = NQ_BUFFER, minRR = MIN_RR,
       tpFrac = TP_FRAC, skipBand = SKIP_BAND, is24x7 = false,
       pointValue = 20.0, contracts = 1.0,
+      pyramidingLimit = PYRAMID, requireProfitToPyramid = true,
     )
     val rumersNq = RumersTest.runStrategy(nqBars15m, nqRthHL, rumersNqCfg)
     rows += rumersRow("Rumers", "NQ", "M15", nqYears, rumersNq, rumersNqCfg)
@@ -103,6 +107,7 @@ object CrossComparison {
       lookback = LOOKBACK, bufferPts = ETH_BUFFER, minRR = MIN_RR,
       tpFrac = TP_FRAC, skipBand = SKIP_BAND, is24x7 = true,
       pointValue = 1.0, contracts = 1.0,
+      pyramidingLimit = PYRAMID, requireProfitToPyramid = true,
     )
     val rumersEth = RumersTest.runStrategy(ethBars, ethDailyHL, rumersEthCfg)
     rows += rumersRow("Rumers", "ETH", "H1", ethYears, rumersEth, rumersEthCfg)
@@ -151,7 +156,7 @@ object CrossComparison {
       tradeType = TradeType.LONG,
       runTimeFrame = runTf,
       trailingStops = false,
-      pyramidingLimit = 6,
+      pyramidingLimit = PYRAMID,
       startingBalance = 13_000.0,
       betSize = 0.02,
       feePerTrade = 0.0004,
@@ -227,8 +232,9 @@ object CrossComparison {
       ))
     }
     println()
-    println("Note: total/annual \$ are NATIVE: Rumers = 1 unit per trade")
-    println("(NQ \$20/pt × 1 contract; ETH 1 ETH); Squeeze = \$13k account × 0.02 bet, 6× pyramid.")
+    println("Note: total/annual \$ are NATIVE units. Rumers = 1 unit per signal")
+    println("(NQ \$20/pt × 1 contract; ETH 1 ETH). Squeeze = \$13k account × 0.02 bet.")
+    println("BOTH STRATEGIES: pyramidingLimit=$PYRAMID, profit-gated.")
     println("Use PF, win%, avgWin%, avgLoss%, annRet%/yr for cross-comparison.")
   }
 
@@ -245,7 +251,8 @@ object CrossComparison {
 <section class="alert">
 <div><h3 class="font-bold">How to read this</h3>
 <div class="text-sm">PF, win%, avgWin%, avgLoss%, and annRet%/yr are directly comparable.<br>
-Absolute \$ amounts are NOT comparable: Rumers = 1 NQ contract / 1 ETH per signal; Squeeze = \$13k account × 0.02 bet with 6× pyramid.</div></div></section>
+Absolute \$ amounts are NOT comparable: Rumers = 1 NQ contract / 1 ETH per signal; Squeeze = \$13k account × 0.02 bet.<br>
+Both strategies use <code>pyramidingLimit=$PYRAMID</code> with the profit gate ON.</div></div></section>
 <section class="card bg-base-100 shadow"><div class="card-body"><h2 class="card-title">Comparison</h2>
 <div class="overflow-x-auto"><table class="table table-zebra"><thead><tr>
 <th>Strategy</th><th>Asset</th><th>TF</th><th>Years</th>

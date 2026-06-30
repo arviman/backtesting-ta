@@ -87,6 +87,13 @@ object RumersTest {
     val is24x7: Boolean = false,
     val pointValue: Double = 20.0,   // NQ: $20 / point. ETH: 1.0 ($ per unit).
     val contracts: Double = 1.0,
+    // Pyramiding: max same-direction concurrent positions sharing the day's SL/TP.
+    // Each tier opens on its own bar and exits with the others when SL/TP fires.
+    val pyramidingLimit: Int = 1,
+    // Profit gate: when true, a new tier is only added if the existing tiers
+    // are in profit (price has moved in our favour since the last entry).
+    // Mirrors SqueezeMomentumBot's RequireProfitToPyramid.
+    val requireProfitToPyramid: Boolean = true,
   ) {
     val gates: SessionGates get() = if (is24x7) ALWAYS_ON_GATES else NQ_GATES
   }
@@ -327,7 +334,7 @@ object RumersTest {
 
     var balance = 0.0
     val trades = mutableListOf<Trade>()
-    var open: Position? = null
+    val open = mutableListOf<Position>()
 
     val yearlyPnL = sortedMapOf<Int, Double>()
     val yearStartBal = sortedMapOf<Int, Double>()
@@ -339,7 +346,7 @@ object RumersTest {
     var todaySH: Double? = null
     var todaySL: Double? = null
     var todayPrevClose = Double.NaN
-    var hasTradedToday = false
+    var entryCountToday = 0
 
     fun closePos(pos: Position, exit: Double, reason: CloseReason, year: Int, date: LocalDate) {
       val pts = (exit - pos.entryPrice) * pos.side
@@ -347,6 +354,11 @@ object RumersTest {
       balance += dollars
       trades += Trade(pos.side, pos.entryPrice, exit, pts, dollars, reason, year, date)
       yearlyPnL.merge(year, dollars) { a, b -> a + b }
+    }
+
+    fun closeAll(exit: Double, reason: CloseReason, year: Int, date: LocalDate) {
+      for (p in open) closePos(p, exit, reason, year, date)
+      open.clear()
     }
 
     fun setupLevelsFor(date: LocalDate, firstBarOpen: Double) {
@@ -383,25 +395,29 @@ object RumersTest {
       yearStartBal.getOrPut(year) { balance }
 
       if (currentDay == null || currentDay != date) {
-        open?.let { closePos(it, bar.open, CloseReason.EOD, year, currentDay ?: date) }
-        open = null
+        if (open.isNotEmpty()) closeAll(bar.open, CloseReason.EOD, year, currentDay ?: date)
         currentDay = date
-        hasTradedToday = false
+        entryCountToday = 0
         setupLevelsFor(date, bar.open)
       }
 
       val inRTH = mod in gates.firstBarMin..gates.lastBarMin
 
-      open = open?.let { pos ->
-        val hitSL = if (pos.side > 0) bar.low <= pos.slPrice else bar.high >= pos.slPrice
-        if (hitSL) { closePos(pos, pos.slPrice, CloseReason.SL, year, date); null } else pos
+      // Intrabar SL / TP — all tiers share day-level levels so they exit together.
+      if (open.isNotEmpty()) {
+        val proto = open[0]
+        val hitSL = if (proto.side > 0) bar.low <= proto.slPrice else bar.high >= proto.slPrice
+        if (hitSL) closeAll(proto.slPrice, CloseReason.SL, year, date)
       }
-      open = open?.let { pos ->
-        val hitTP = if (pos.side > 0) bar.high >= pos.tpPrice else bar.low <= pos.tpPrice
-        if (hitTP) { closePos(pos, pos.tpPrice, CloseReason.TP, year, date); null } else pos
+      if (open.isNotEmpty()) {
+        val proto = open[0]
+        val hitTP = if (proto.side > 0) bar.high >= proto.tpPrice else bar.low <= proto.tpPrice
+        if (hitTP) closeAll(proto.tpPrice, CloseReason.TP, year, date)
       }
 
-      if (inRTH && open == null && !hasTradedToday && mod <= gates.lastEntryMin) {
+      if (inRTH && open.size < cfg.pyramidingLimit
+          && entryCountToday < cfg.pyramidingLimit
+          && mod <= gates.lastEntryMin) {
         val sh = todaySH
         val sl = todaySL
         val rh = todayRH
@@ -415,35 +431,48 @@ object RumersTest {
           val allowShort = sh != null && closeFrac <= 1.0 - cfg.skipBand
           val allowLong  = sl != null && closeFrac >= cfg.skipBand
 
-          // SHORT
-          if (allowShort) {
+          val currentSide = open.firstOrNull()?.side ?: 0   // 0 = no position yet
+          val lastEntry = open.lastOrNull()?.entryPrice ?: Double.NaN
+
+          // SHORT (allowed only if no opposing position is open)
+          if (allowShort && currentSide >= 0) {
             val stop = sh!! + cfg.bufferPts
             val tp = rh - cfg.tpFrac * range
             if (stop > tp) {
               val entryFloor = (cfg.minRR * stop + tp) / (1.0 + cfg.minRR)
-              if (close in entryFloor..sh) {
-                open = Position(side = -1, entryPrice = close, slPrice = stop, tpPrice = tp)
-                hasTradedToday = true
+              // Profit gate: shorts profit when price drops, so a new tier needs
+              // close < lastEntry (price has come down since the last short).
+              val profitOk = open.isEmpty() || !cfg.requireProfitToPyramid ||
+                  (close < lastEntry)
+              if (profitOk && close in entryFloor..sh) {
+                open.add(Position(side = -1, entryPrice = close, slPrice = stop, tpPrice = tp))
+                entryCountToday++
               }
             }
           }
-          // LONG
-          if (open == null && allowLong) {
+          // LONG (allowed only if no opposing position is open and we didn't just enter short)
+          val sideAfter = open.firstOrNull()?.side ?: 0
+          if (allowLong && sideAfter <= 0) {
             val stop = sl!! - cfg.bufferPts
             val tp = rl + cfg.tpFrac * range
             if (tp > stop) {
               val entryCeil = (cfg.minRR * stop + tp) / (1.0 + cfg.minRR)
-              if (close in sl..entryCeil) {
-                open = Position(side = +1, entryPrice = close, slPrice = stop, tpPrice = tp)
-                hasTradedToday = true
+              val lastL = open.lastOrNull()?.entryPrice ?: Double.NaN
+              val profitOk = open.isEmpty() || !cfg.requireProfitToPyramid ||
+                  (close > lastL)
+              if (profitOk && close in sl..entryCeil
+                  && open.size < cfg.pyramidingLimit
+                  && entryCountToday < cfg.pyramidingLimit) {
+                open.add(Position(side = +1, entryPrice = close, slPrice = stop, tpPrice = tp))
+                entryCountToday++
               }
             }
           }
         }
       }
 
-      if (mod >= gates.forceCloseMin) {
-        open?.let { closePos(it, close, CloseReason.EOD, year, date); open = null }
+      if (mod >= gates.forceCloseMin && open.isNotEmpty()) {
+        closeAll(close, CloseReason.EOD, year, date)
       }
 
       val ys = yearStartBal[year]!!
