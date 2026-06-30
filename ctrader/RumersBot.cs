@@ -27,31 +27,39 @@
 //
 // ─── Defaults (eval-tuned: the5ers $100k cTrader on NAS100 CFD) ─────────
 //   lookback=30, buffer=10, minRR=2.0, tpFrac=0.75, pyramid=1, rejection=on
-//   Volume=50 lots (NAS100 CFD on the5ers' Pepperstone broker = $1/pt/lot,
-//   so 50 lots → $50/pt, which matches a 2.5 NQ-futures position size).
+//   Volume=20 lots (NAS100 CFD on the5ers' Pepperstone broker = $1/pt/lot,
+//   so 20 lots → $20/pt — the same risk magnitude as 1 NQ futures contract).
 //
 //   Backtest is on NQ futures (CME, $20/pt) at 1 contract:
 //     88 trades · PF 2.17 · peakDD $3,110 · worst day -$2,925
 //
-//   Bootstrap monte-carlo (20k iter, 6-mo eval window, $50/pt sizing):
-//     P(pass $8k target) = 47%   P(bust $4k daily / $10k DD) = 8%
-//     Median pass time   = 2.7 mo (when passing)
+//   Bootstrap monte-carlo (20k iter, 6-mo eval window):
+//     Volume=20 ($20/pt):   P(pass $8k)=12%, P(bust)=0%      — safe & slow
+//     Volume=25 ($25/pt):   P(pass)=22%,    P(bust)=0.1%     — still safe
+//     Volume=40 ($40/pt):   P(pass)=39%,    P(bust)=8%       — faster, real risk
+//     Volume=50 ($50/pt):   P(pass)=47%,    P(bust)=8%       — observed to bust live
 //
-//   Pushing to $60/pt (Volume=60): P(pass)=50%, P(bust)=14% — faster, riskier.
-//   Dropping to $40/pt (Volume=40): P(pass)=39%, P(bust)=8% — same risk, slower.
-//   $50/pt is the risk-adjusted sweet spot. See .lavish/rumers-bootstrap.html
-//   for the full sweep.
+//   Live observation (2025-12-18 → 2026-06-30, ~6 months):
+//     Vol=2.5  → +$1k       (way undersized, ran clean)
+//     Vol=30   → +$17k / $7k DD (close to cap)
+//     Vol=50   → blew up (the bootstrap's 8% bust bucket materialized)
+//
+//   The default is now Volume=20 because (a) live realized DD ran ~1.5×
+//   the backtest DD, so backtest sizing needs a margin of safety; (b) a
+//   winning strategy is worthless if you blow the eval; (c) live alpha
+//   appears stronger than backtest, so even conservative sizing should
+//   hit the target in time.
 //
 // ─── WARNING: VOLUME IS BROKER-SPECIFIC ────────────────────────────────
-// Volume=50 assumes the broker quotes NAS100 (or US100 / USTEC / NDX) as a
+// Volume=20 assumes the broker quotes NAS100 (or US100 / USTEC / NDX) as a
 // CFD where 1 lot = $1 per index point. This is the standard cTrader spec
 // on Pepperstone, IC Markets, and the5ers' broker integration.
 //
 // On a different broker, REASSESS Volume before going live:
 //   1. Open the symbol in cTrader → Symbol Info → check "Pip value" at 1 lot.
-//   2. Target $/pt = $50 (the backtest's eval-tuned size).
-//   3. Set Volume = $50 ÷ (broker's $ per pt per lot).
-// Examples: NQ futures at $20/pt → Volume = 2.5. MNQ micros at $2/pt → 25.
+//   2. Target $/pt = $20 (the backtest-equivalent 1-NQ-futures sizing).
+//   3. Set Volume = $20 ÷ (broker's $ per pt per lot).
+// Examples: NQ futures at $20/pt → Volume = 1. MNQ micros at $2/pt → 10.
 //
 // All knobs exposed for the cAlgo optimizer.
 //
@@ -78,9 +86,13 @@ namespace cAlgo.Robots
     public class RumersBot : Robot
     {
         // ────── Sizing ──────
-        // Default 50 = the5ers $100k on NAS100 CFD ($1/pt/lot brokers).
-        // For NQ futures use 2.5; for other brokers reassess (see header).
-        [Parameter("Volume (lots)", DefaultValue = 50, MinValue = 0.01, Step = 0.01, Group = "Sizing")]
+        // Default 20 = SAFE sizing on the5ers $100k NAS100 CFD ($1/pt/lot).
+        // Bootstrap predicts ~0% bust, ~12% pass in 6mo at backtest profitability.
+        // Live observation (Dec 2025 → Jun 2026) saw live alpha ~5× backtest, so
+        // 20 lots should still hit the $8k target in well under 6 months in practice.
+        // Push higher (25, 30) only after sustained live data confirms the alpha.
+        // For NQ futures use 1; for other brokers reassess (see header).
+        [Parameter("Volume (lots)", DefaultValue = 20, MinValue = 0.01, Step = 0.01, Group = "Sizing")]
         public double VolumeLots { get; set; }
 
         [Parameter("Label", DefaultValue = "Rumers", Group = "Sizing")]
