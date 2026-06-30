@@ -45,36 +45,64 @@ object RumersTest {
 
   private const val DATA_PATH = "sampledata/NQ_5Years_8_11_2024.csv"
   private const val OUT_HTML = ".lavish/rumers.html"
-  private const val POINT_VALUE = 20.0
-  private const val CONTRACTS = 1.0
 
-  // A 15m bar timestamped 9:45 covers 9:30-9:45 → first RTH bar.
-  // 16:00 bar covers 15:45-16:00 → last RTH bar.
-  private const val RTH_FIRST_BAR_MIN = 9 * 60 + 45     // 09:45
-  private const val RTH_LAST_BAR_MIN  = 16 * 60         // 16:00
-  private const val LAST_ENTRY_MIN    = 15 * 60 + 45    // 15:45
-  private const val FORCE_CLOSE_MIN   = 16 * 60         // 16:00
+  // NQ session gates: a 15m bar timestamped 9:45 covers 9:30-9:45 → first
+  // RTH bar; 16:00 bar covers 15:45-16:00 → last RTH bar.
+  internal val NQ_GATES = SessionGates(
+    firstBarMin = 9 * 60 + 45,
+    lastBarMin = 16 * 60,
+    lastEntryMin = 15 * 60 + 45,
+    forceCloseMin = 16 * 60,
+    dailyHLFirstMin = 9 * 60 + 35,
+    dailyHLLastMin = 16 * 60,
+  )
 
-  data class Config(
+  // 24/7 gates (ETH): entries allowed across the whole UTC day, with a
+  // 2-hour cool-off at the end so trades have room to play out before the
+  // day rollover EOD closes them.
+  internal val ALWAYS_ON_GATES = SessionGates(
+    firstBarMin = 0,
+    lastBarMin = 23 * 60 + 59,
+    lastEntryMin = 22 * 60,
+    forceCloseMin = 23 * 60 + 59,
+    dailyHLFirstMin = 0,
+    dailyHLLastMin = 23 * 60 + 59,
+  )
+
+  internal data class SessionGates(
+    val firstBarMin: Int,
+    val lastBarMin: Int,
+    val lastEntryMin: Int,
+    val forceCloseMin: Int,
+    val dailyHLFirstMin: Int,
+    val dailyHLLastMin: Int,
+  )
+
+  internal data class Config(
     val lookback: Int = 15,
     val bufferPts: Double = 3.0,
     val minRR: Double = 1.0,
     val tpFrac: Double = 1.0,
     val skipBand: Double = 0.0,
-  )
+    val is24x7: Boolean = false,
+    val pointValue: Double = 20.0,   // NQ: $20 / point. ETH: 1.0 ($ per unit).
+    val contracts: Double = 1.0,
+  ) {
+    val gates: SessionGates get() = if (is24x7) ALWAYS_ON_GATES else NQ_GATES
+  }
 
   private val BASELINE = Config()
 
-  enum class CloseReason { TP, SL, EOD }
+  internal enum class CloseReason { TP, SL, EOD }
 
-  data class Position(
+  internal data class Position(
     val side: Int,           // +1 long, -1 short
     val entryPrice: Double,
     val slPrice: Double,
     val tpPrice: Double,
   )
 
-  data class Trade(
+  internal data class Trade(
     val side: Int,
     val entry: Double,
     val exit: Double,
@@ -85,7 +113,7 @@ object RumersTest {
     val date: LocalDate,
   )
 
-  data class Result(
+  internal data class Result(
     val trades: List<Trade>,
     val yearlyPnL: Map<Int, Double>,
     val yearlyFromStartDD: Map<Int, Double>,
@@ -113,7 +141,7 @@ object RumersTest {
       get() = CloseReason.values().associateWith { r -> trades.count { it.reason == r } }
   }
 
-  data class SweepRow(val cfg: Config, val r: Result)
+  internal data class SweepRow(val cfg: Config, val r: Result)
 
   @JvmStatic
   fun main(args: Array<String>) {
@@ -237,12 +265,16 @@ object RumersTest {
   // Pre-pass helpers
   // ───────────────────────────────────────────────────────────────────────
 
-  private fun buildRthDailyHL(bars5m: List<Bar>): Map<LocalDate, Pair<Double, Double>> {
-    val out = sortedMapOf<LocalDate, DoubleArray>() // [high, low]
-    for (b in bars5m) {
+  internal fun buildRthDailyHL(bars5m: List<Bar>): Map<LocalDate, Pair<Double, Double>> =
+    buildDailyHL(bars5m, NQ_GATES.dailyHLFirstMin, NQ_GATES.dailyHLLastMin)
+
+  /** Builds per-UTC-date (high, low) over bars whose minute-of-day falls in [firstMin, lastMin]. */
+  internal fun buildDailyHL(bars: List<Bar>, firstMin: Int, lastMin: Int): Map<LocalDate, Pair<Double, Double>> {
+    val out = sortedMapOf<LocalDate, DoubleArray>()
+    for (b in bars) {
       val zdt = b.openTime.atZone(ZoneOffset.UTC)
       val mod = zdt.hour * 60 + zdt.minute
-      if (mod < 9 * 60 + 35 || mod > 16 * 60) continue
+      if (mod < firstMin || mod > lastMin) continue
       val date = zdt.toLocalDate()
       val hl = out.getOrPut(date) { doubleArrayOf(Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY) }
       if (b.high > hl[0]) hl[0] = b.high
@@ -251,7 +283,7 @@ object RumersTest {
     return out.mapValues { it.value[0] to it.value[1] }
   }
 
-  private fun aggregateTo15m(bars5m: List<Bar>): List<Bar> {
+  internal fun aggregateTo15m(bars5m: List<Bar>): List<Bar> {
     val out = mutableListOf<Bar>()
     var cur: Bar? = null
     var curKeyMin = Long.MIN_VALUE
@@ -282,11 +314,12 @@ object RumersTest {
   // Strategy
   // ───────────────────────────────────────────────────────────────────────
 
-  private fun runStrategy(
+  internal fun runStrategy(
     bars: List<Bar>,
     rthHL: Map<LocalDate, Pair<Double, Double>>,
     cfg: Config,
   ): Result {
+    val gates = cfg.gates
     val rthDates = rthHL.keys.sorted()
     val dateIdx = HashMap<LocalDate, Int>(rthDates.size).apply {
       rthDates.forEachIndexed { i, d -> put(d, i) }
@@ -310,7 +343,7 @@ object RumersTest {
 
     fun closePos(pos: Position, exit: Double, reason: CloseReason, year: Int, date: LocalDate) {
       val pts = (exit - pos.entryPrice) * pos.side
-      val dollars = pts * POINT_VALUE * CONTRACTS
+      val dollars = pts * cfg.pointValue * cfg.contracts
       balance += dollars
       trades += Trade(pos.side, pos.entryPrice, exit, pts, dollars, reason, year, date)
       yearlyPnL.merge(year, dollars) { a, b -> a + b }
@@ -357,7 +390,7 @@ object RumersTest {
         setupLevelsFor(date, bar.open)
       }
 
-      val inRTH = mod in RTH_FIRST_BAR_MIN..RTH_LAST_BAR_MIN
+      val inRTH = mod in gates.firstBarMin..gates.lastBarMin
 
       open = open?.let { pos ->
         val hitSL = if (pos.side > 0) bar.low <= pos.slPrice else bar.high >= pos.slPrice
@@ -368,7 +401,7 @@ object RumersTest {
         if (hitTP) { closePos(pos, pos.tpPrice, CloseReason.TP, year, date); null } else pos
       }
 
-      if (inRTH && open == null && !hasTradedToday && mod <= LAST_ENTRY_MIN) {
+      if (inRTH && open == null && !hasTradedToday && mod <= gates.lastEntryMin) {
         val sh = todaySH
         val sl = todaySL
         val rh = todayRH
@@ -409,7 +442,7 @@ object RumersTest {
         }
       }
 
-      if (mod >= FORCE_CLOSE_MIN) {
+      if (mod >= gates.forceCloseMin) {
         open?.let { closePos(it, close, CloseReason.EOD, year, date); open = null }
       }
 
