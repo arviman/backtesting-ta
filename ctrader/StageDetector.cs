@@ -16,6 +16,13 @@
 //           Still accessible from other indicators / cBots via
 //           Indicators.GetIndicator<StageDetector>(...).Stage.
 //
+// Shade modes (Display → Shade mode):
+//   Rectangle  : one ChartRectangle per stage cycle. Finalised runs persist
+//                under "stage_<startIndex>"; the in-progress run is redrawn
+//                under the same name as it grows. Autoscale-safe.
+//   BarColor   : tint each bar via Chart.SetBarColor.
+//   None       : no shading.
+//
 // Indexing: cTrader Indicators run forward. Calculate(int index) is invoked
 // per bar oldest→newest, then re-invoked on the in-flight (last) bar each
 // tick. The _lastDirectional latch only advances when a bar is genuinely in
@@ -28,6 +35,13 @@ using cAlgo.API.Internals;
 
 namespace cAlgo.Indicators
 {
+    public enum StageShadeMode
+    {
+        None,        // no shading
+        Rectangle,   // one chart rectangle per stage cycle
+        BarColor,    // tint each bar via Chart.SetBarColor
+    }
+
     [Indicator(IsOverlay = true, AccessRights = AccessRights.None)]
     public class StageDetector : Indicator
     {
@@ -36,7 +50,7 @@ namespace cAlgo.Indicators
         [Parameter("SMA Mid 2", DefaultValue = 30, MinValue = 2, Group = "Ribbon")] public int Mid2Len  { get; set; }
         [Parameter("SMA Slow",  DefaultValue = 40, MinValue = 2, Group = "Ribbon")] public int SlowLen  { get; set; }
 
-        [Parameter("Shade background by stage", DefaultValue = true, Group = "Display")] public bool ShadeBackground { get; set; }
+        [Parameter("Shade mode", DefaultValue = StageShadeMode.Rectangle, Group = "Display")] public StageShadeMode ShadeMode { get; set; }
         [Parameter("Shade opacity (0-255)", DefaultValue = 40, MinValue = 0, MaxValue = 255, Group = "Display")] public int ShadeOpacity { get; set; }
 
         [Output("SMA 10", LineColor = "DodgerBlue",   PlotType = PlotType.Line, Thickness = 2)]
@@ -53,6 +67,13 @@ namespace cAlgo.Indicators
 
         private SimpleMovingAverage _f, _m1, _m2, _s;
         private int _lastDirectional; // 0 = none, 2 = Stage 2, 4 = Stage 4
+
+        // Rectangle-mode run tracking. _runStart is the bar index where the
+        // current stage run began. Finalised runs stay on the chart under
+        // "stage_<startIndex>". The in-progress run is re-drawn under the
+        // same name on every Calculate, so the rectangle grows with the run.
+        private int _runStart  = -1;
+        private int _lastSeenIndex = -1;
 
         protected override void Initialize()
         {
@@ -88,46 +109,74 @@ namespace cAlgo.Indicators
 
             Stage[index] = stage;
 
-            if (ShadeBackground) DrawStageShade(index, stage);
+            switch (ShadeMode)
+            {
+                case StageShadeMode.Rectangle: DrawRunRectangle(index, stage); break;
+                case StageShadeMode.BarColor:  Chart.SetBarColor(index, BarColorFor(stage)); break;
+            }
         }
 
-        // Per-bar background rectangle spanning the bar's time slot. Y bounds
-        // are clamped to the rolling bar high/low so the rectangle never
-        // exceeds the natural price range — autoscale stays unaffected.
-        // ponytail: per-bar local bounds, switch to full-axis ±1e10 if a "no autoscale" mode is wanted.
-        private void DrawStageShade(int index, int stage)
+        // Translucent: blended with chart background — used for Rectangle mode.
+        private Color RectColor(int stage) => stage switch
         {
-            Color shade = stage switch
-            {
-                1 => Color.FromArgb(ShadeOpacity, 255, 255, 255), // white
-                2 => Color.FromArgb(ShadeOpacity,   0, 200,   0), // green
-                3 => Color.FromArgb(ShadeOpacity, 230, 200,   0), // yellow
-                4 => Color.FromArgb(ShadeOpacity, 220,   0,   0), // red
-                _ => Color.FromArgb(0, 0, 0, 0),
-            };
+            1 => Color.FromArgb(ShadeOpacity, 255, 255, 255), // white
+            2 => Color.FromArgb(ShadeOpacity,   0, 200,   0), // green
+            3 => Color.FromArgb(ShadeOpacity, 230, 200,   0), // yellow
+            4 => Color.FromArgb(ShadeOpacity, 220,   0,   0), // red
+            _ => Color.FromArgb(0, 0, 0, 0),
+        };
 
-            DateTime t1 = Bars.OpenTimes[index];
-            DateTime t2 = (index + 1 < Bars.Count)
+        // Solid: replaces the bar's own color — Chart.SetBarColor with low
+        // alpha is effectively invisible, so BarColor mode ignores
+        // ShadeOpacity. Stage 1 uses grey instead of white because white
+        // bars on a default white chart are invisible.
+        private Color BarColorFor(int stage) => stage switch
+        {
+            1 => Color.FromArgb(255, 160, 160, 160), // grey
+            2 => Color.FromArgb(255,   0, 180,   0), // green
+            3 => Color.FromArgb(255, 220, 180,   0), // yellow
+            4 => Color.FromArgb(255, 210,   0,   0), // red
+            _ => Color.FromArgb(0, 0, 0, 0),
+        };
+
+        // One rectangle per consecutive same-stage run. Finalised runs persist
+        // under "stage_<startIndex>". The in-progress run is redrawn under the
+        // same name every Calculate, extending in time and price as it grows.
+        // Y bounds are min(low)/max(high) within the run — autoscale-safe.
+        private void DrawRunRectangle(int index, int stage)
+        {
+            if (_runStart < 0) _runStart = index;
+
+            // On the first call for a brand new bar, check whether the
+            // just-closed bar (index-1) sits at a stage transition; if so the
+            // previously-running rect is now "finalised" (already drawn under
+            // its own name) and a new run begins at index-1.
+            if (index > _lastSeenIndex && index - 2 >= SlowLen)
+            {
+                int prevStage     = (int)Stage[index - 1];
+                int prevPrevStage = (int)Stage[index - 2];
+                if (prevStage != prevPrevStage) _runStart = index - 1;
+            }
+            _lastSeenIndex = Math.Max(_lastSeenIndex, index);
+
+            int runStage = (int)Stage[_runStart];
+            if (runStage < 1 || runStage > 4) return;
+
+            double yLow  = double.MaxValue;
+            double yHigh = double.MinValue;
+            for (int i = _runStart; i <= index; i++)
+            {
+                if (Bars.LowPrices[i]  < yLow)  yLow  = Bars.LowPrices[i];
+                if (Bars.HighPrices[i] > yHigh) yHigh = Bars.HighPrices[i];
+            }
+
+            DateTime t1 = Bars.OpenTimes[_runStart];
+            DateTime t2 = index + 1 < Bars.Count
                 ? Bars.OpenTimes[index + 1]
-                : t1 + (t1 - Bars.OpenTimes[index - 1]);
+                : Bars.OpenTimes[index] + (Bars.OpenTimes[index] - Bars.OpenTimes[index - 1]);
 
-            // Use neighbor bars to smooth the vertical seam between adjacent rectangles.
-            double yLow  = Bars.LowPrices[index];
-            double yHigh = Bars.HighPrices[index];
-            if (index > 0)
-            {
-                yLow  = Math.Min(yLow,  Bars.LowPrices[index - 1]);
-                yHigh = Math.Max(yHigh, Bars.HighPrices[index - 1]);
-            }
-            if (index + 1 < Bars.Count)
-            {
-                yLow  = Math.Min(yLow,  Bars.LowPrices[index + 1]);
-                yHigh = Math.Max(yHigh, Bars.HighPrices[index + 1]);
-            }
-
-            var rect = Chart.DrawRectangle("stage_" + index, t1, yLow, t2, yHigh, shade);
+            var rect = Chart.DrawRectangle("stage_" + _runStart, t1, yLow, t2, yHigh, RectColor(runStage));
             rect.IsFilled = true;
-            rect.Color = shade;
         }
     }
 }

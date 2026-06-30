@@ -3,6 +3,7 @@ package com.arviman.ta.timeseries
 import java.time.Duration
 
 enum class TimeFrame(val duration: Duration) {
+  M1(Duration.ofMinutes(1)),
   M5(Duration.ofMinutes(5)),
   M10(Duration.ofMinutes(10)),
   M15(Duration.ofMinutes(15)),
@@ -17,6 +18,7 @@ enum class TimeFrame(val duration: Duration) {
   companion object {
     @JvmStatic
     fun of(duration: Duration): TimeFrame = when (duration.toMinutes().toInt()) {
+      1 -> M1
       5 -> M5
       10 -> M10
       15 -> M15

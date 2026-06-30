@@ -55,19 +55,69 @@ fun readCsvBars(reader: Reader): List<Bar> =
 
     rows
       .drop(1) // Skips header
-      .map { row ->
-        Bar(
-          timeFrame = timeFrame,
-          openTime = parseDateTime(row[cols.date]),
-          open = parsePrice(row[cols.open]),
-          high = parsePrice(row[cols.high]),
-          low = parsePrice(row[cols.low]),
-          close = parsePrice(row[cols.close]),
-          volume = parseVolume(row[cols.volume]),
-        )
-      }
+      .map { row -> rowToBar(row, cols, timeFrame) }
       .sortedBy { it.openTime } // Ensure chronological order
   }
+
+/**
+ * Streaming CSV reader for files too large to materialize in memory.
+ *
+ * Returns a [Sequence] of [Bar] that lazily parses one row at a time. The
+ * caller must drive iteration (forEach / fold / etc.) and must consume the
+ * sequence fully so the underlying file handle closes promptly.
+ *
+ * Unlike [readCsvBars], rows are NOT sorted \u2014 the file must already be in
+ * chronological order. For Binance-style intraday klines this is the case.
+ *
+ * Pass [knownTimeFrame] to skip detection (one extra row read). For 1-minute
+ * Binance files: `streamCsvBars(path, TimeFrame.M5)` etc.
+ */
+fun streamCsvBars(fileName: String, knownTimeFrame: TimeFrame? = null): Sequence<Bar> =
+  streamCsvBars(FileReader(File(fileName)), knownTimeFrame)
+
+fun streamCsvBars(reader: Reader, knownTimeFrame: TimeFrame? = null): Sequence<Bar> = sequence {
+  CSVReader(reader).use { csv ->
+    val headerRow = csv.readNext() ?: return@use
+    val header = headerRow.map { it.trim().lowercase().replace("\"", "").replace("\uFEFF", "") }
+    val cols = ColumnIndex(header)
+
+    val first = csv.readNext() ?: return@use
+    val tf: TimeFrame
+    val pending: Array<String>?
+    if (knownTimeFrame != null) {
+      tf = knownTimeFrame
+      pending = null
+    } else {
+      val second = csv.readNext()
+      if (second == null) {
+        // Single-bar file, can't detect TF \u2014 bail.
+        return@use
+      }
+      tf = TimeFrame.of(
+        Duration.between(parseDateTime(first[cols.date]), parseDateTime(second[cols.date])).abs()
+      )
+      pending = second
+    }
+
+    yield(rowToBar(first, cols, tf))
+    if (pending != null) yield(rowToBar(pending, cols, tf))
+    while (true) {
+      val row = csv.readNext() ?: break
+      yield(rowToBar(row, cols, tf))
+    }
+  }
+}
+
+private fun rowToBar(row: Array<String>, cols: ColumnIndex, tf: TimeFrame): Bar =
+  Bar(
+    timeFrame = tf,
+    openTime = parseDateTime(row[cols.date]),
+    open = parsePrice(row[cols.open]),
+    high = parsePrice(row[cols.high]),
+    low = parsePrice(row[cols.low]),
+    close = parsePrice(row[cols.close]),
+    volume = parseVolume(row[cols.volume]),
+  )
 
 // ===========================================================
 // Column-mapping from header names

@@ -330,6 +330,7 @@ object RumersTest {
     bars: List<Bar>,
     rthHL: Map<LocalDate, Pair<Double, Double>>,
     cfg: Config,
+    vpTargetByDate: Map<LocalDate, Double>? = null,
   ): Result {
     val gates = cfg.gates
     val rthDates = rthHL.keys.sorted()
@@ -442,7 +443,10 @@ object RumersTest {
           // SHORT (allowed only if no opposing position is open)
           if (allowShort && currentSide >= 0) {
             val stop = sh!! + cfg.bufferPts
-            val tp = rh - cfg.tpFrac * range
+            val originalTp = rh - cfg.tpFrac * range
+            // VP TP if available, tighter than original, and below current close.
+            val vpTp = vpTargetByDate?.get(date)
+            val tp = if (vpTp != null && vpTp > originalTp && vpTp < close) vpTp else originalTp
             if (stop > tp) {
               val entryFloor = (cfg.minRR * stop + tp) / (1.0 + cfg.minRR)
               // Profit gate: shorts profit when price drops, so a new tier needs
@@ -461,7 +465,9 @@ object RumersTest {
           val sideAfter = open.firstOrNull()?.side ?: 0
           if (allowLong && sideAfter <= 0) {
             val stop = sl!! - cfg.bufferPts
-            val tp = rl + cfg.tpFrac * range
+            val originalTp = rl + cfg.tpFrac * range
+            val vpTp = vpTargetByDate?.get(date)
+            val tp = if (vpTp != null && vpTp < originalTp && vpTp > close) vpTp else originalTp
             if (tp > stop) {
               val entryCeil = (cfg.minRR * stop + tp) / (1.0 + cfg.minRR)
               val lastL = open.lastOrNull()?.entryPrice ?: Double.NaN

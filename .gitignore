@@ -46,3 +46,7 @@ out/
 
 ### no-mistakes runtime state ###
 .atl/
+
+### Large local datasets (too big for the repo) ###
+sampledata/*_1m_*.csv
+sampledata/*.parquet
