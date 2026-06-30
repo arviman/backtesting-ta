@@ -27,28 +27,28 @@
 //
 // ─── Defaults (eval-tuned: the5ers $100k cTrader on NAS100 CFD) ─────────
 //   lookback=30, buffer=10, minRR=2.0, tpFrac=0.75, pyramid=1, rejection=on
-//   Volume=20 lots (NAS100 CFD on the5ers' Pepperstone broker = $1/pt/lot,
-//   so 20 lots → $20/pt — the same risk magnitude as 1 NQ futures contract).
+//   Volume=30 lots (NAS100 CFD on the5ers' Pepperstone broker = $1/pt/lot,
+//   so 30 lots → $30/pt — risk magnitude of 1.5 NQ futures contracts).
 //
 //   Backtest is on NQ futures (CME, $20/pt) at 1 contract:
 //     88 trades · PF 2.17 · peakDD $3,110 · worst day -$2,925
 //
 //   Bootstrap monte-carlo (20k iter, 6-mo eval window):
 //     Volume=20 ($20/pt):   P(pass $8k)=12%, P(bust)=0%      — safe & slow
-//     Volume=25 ($25/pt):   P(pass)=22%,    P(bust)=0.1%     — still safe
+//     Volume=25 ($25/pt):   P(pass)=22%,    P(bust)=0.1%     — still very safe
+//     Volume=30 ($30/pt):   P(pass)=~27%,   P(bust)=~8%      — balanced
 //     Volume=40 ($40/pt):   P(pass)=39%,    P(bust)=8%       — faster, real risk
 //     Volume=50 ($50/pt):   P(pass)=47%,    P(bust)=8%       — observed to bust live
 //
 //   Live observation (2025-12-18 → 2026-06-30, ~6 months):
-//     Vol=2.5  → +$1k       (way undersized, ran clean)
-//     Vol=30   → +$17k / $7k DD (close to cap)
+//     Vol=2.5  → +$1k         (way undersized, ran clean)
+//     Vol=30   → +$17k / $7k DD (used 70% of cap, hit target)
 //     Vol=50   → blew up (the bootstrap's 8% bust bucket materialized)
 //
-//   The default is now Volume=20 because (a) live realized DD ran ~1.5×
-//   the backtest DD, so backtest sizing needs a margin of safety; (b) a
-//   winning strategy is worthless if you blow the eval; (c) live alpha
-//   appears stronger than backtest, so even conservative sizing should
-//   hit the target in time.
+//   Default is Volume=30 because it was the live-tested sweet spot: hit
+//   target with margin, observed peak DD = 70% of the $10k cap. The
+//   bootstrap's bust probability at $30/pt is ~8% — non-trivial, accepted
+//   in exchange for faster target hit. Drop to 20 if you want bust-free.
 //
 // ─── WARNING: VOLUME IS BROKER-SPECIFIC ────────────────────────────────
 // Volume=20 assumes the broker quotes NAS100 (or US100 / USTEC / NDX) as a
@@ -57,9 +57,9 @@
 //
 // On a different broker, REASSESS Volume before going live:
 //   1. Open the symbol in cTrader → Symbol Info → check "Pip value" at 1 lot.
-//   2. Target $/pt = $20 (the backtest-equivalent 1-NQ-futures sizing).
-//   3. Set Volume = $20 ÷ (broker's $ per pt per lot).
-// Examples: NQ futures at $20/pt → Volume = 1. MNQ micros at $2/pt → 10.
+//   2. Target $/pt = $30 (the live-tested sweet spot on this strategy).
+//   3. Set Volume = $30 ÷ (broker's $ per pt per lot).
+// Examples: NQ futures at $20/pt → Volume = 1.5. MNQ micros at $2/pt → 15.
 //
 // All knobs exposed for the cAlgo optimizer.
 //
@@ -86,13 +86,13 @@ namespace cAlgo.Robots
     public class RumersBot : Robot
     {
         // ────── Sizing ──────
-        // Default 20 = SAFE sizing on the5ers $100k NAS100 CFD ($1/pt/lot).
-        // Bootstrap predicts ~0% bust, ~12% pass in 6mo at backtest profitability.
-        // Live observation (Dec 2025 → Jun 2026) saw live alpha ~5× backtest, so
-        // 20 lots should still hit the $8k target in well under 6 months in practice.
-        // Push higher (25, 30) only after sustained live data confirms the alpha.
-        // For NQ futures use 1; for other brokers reassess (see header).
-        [Parameter("Volume (lots)", DefaultValue = 20, MinValue = 0.01, Step = 0.01, Group = "Sizing")]
+        // Default 30 = the live-tested sweet spot on the5ers $100k NAS100 CFD
+        // ($1/pt/lot). Hit +$17k / $7k peak DD over 6 months Dec 2025 → Jun 2026.
+        // Bootstrap-implied bust probability ~8% — accepted for faster pass.
+        // Drop to 20 for ~0% bust if eval reset cost > speed value.
+        // Push to 40+ only with strong live evidence; 50 blew up in testing.
+        // For NQ futures use 1.5; for other brokers reassess (see header).
+        [Parameter("Volume (lots)", DefaultValue = 30, MinValue = 0.01, Step = 0.01, Group = "Sizing")]
         public double VolumeLots { get; set; }
 
         [Parameter("Label", DefaultValue = "Rumers", Group = "Sizing")]
