@@ -94,6 +94,11 @@ object RumersTest {
     // are in profit (price has moved in our favour since the last entry).
     // Mirrors SqueezeMomentumBot's RequireProfitToPyramid.
     val requireProfitToPyramid: Boolean = true,
+    // Rejection-wick entry gate (option C):
+    //   SHORT requires bar.high > SH (price pierced the swing high then closed
+    //   back inside the entry zone). LONG requires bar.low < SL. Filters out
+    //   passive grind-into-zone entries; keeps only stop-hunt rejections.
+    val requireRejection: Boolean = false,
   ) {
     val gates: SessionGates get() = if (is24x7) ALWAYS_ON_GATES else NQ_GATES
   }
@@ -444,7 +449,9 @@ object RumersTest {
               // close < lastEntry (price has come down since the last short).
               val profitOk = open.isEmpty() || !cfg.requireProfitToPyramid ||
                   (close < lastEntry)
-              if (profitOk && close in entryFloor..sh) {
+              // Rejection-wick gate: this bar must have pierced SH and closed back.
+              val rejectionOk = !cfg.requireRejection || bar.high > sh
+              if (profitOk && rejectionOk && close in entryFloor..sh) {
                 open.add(Position(side = -1, entryPrice = close, slPrice = stop, tpPrice = tp))
                 entryCountToday++
               }
@@ -460,7 +467,8 @@ object RumersTest {
               val lastL = open.lastOrNull()?.entryPrice ?: Double.NaN
               val profitOk = open.isEmpty() || !cfg.requireProfitToPyramid ||
                   (close > lastL)
-              if (profitOk && close in sl..entryCeil
+              val rejectionOk = !cfg.requireRejection || bar.low < sl
+              if (profitOk && rejectionOk && close in sl..entryCeil
                   && open.size < cfg.pyramidingLimit
                   && entryCountToday < cfg.pyramidingLimit) {
                 open.add(Position(side = +1, entryPrice = close, slPrice = stop, tpPrice = tp))

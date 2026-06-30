@@ -3,26 +3,45 @@
 // Previous-day-range fade. Mark yesterday's RTH high/low (RH/RL) and the
 // extreme high/low of the last `LookbackDays` RTH days BEFORE yesterday
 // (SH/SL). During today's RTH:
-//   SHORT when close is in [entryFloor, SH]
+//   SHORT when bar.high > SH (rejection wick) AND close in [entryFloor, SH]
 //     stop = SH + Buffer, tp = RH - TpFrac × (RH-RL)
-//   LONG  when close is in [SL, entryCeil]
+//   LONG  when bar.low < SL (rejection wick) AND close in [SL, entryCeil]
 //     stop = SL - Buffer, tp = RL + TpFrac × (RH-RL)
 //   entryFloor / entryCeil enforce a worst-case R:R floor (MinRR).
 // Force close at session end.
 //
+// ─── Rejection-wick gate ────────────────────────────────────────────────
+// RequireRejection=true demands the entry bar pierce SH (shorts) or SL
+// (longs) intra-bar and close back inside the zone. This filters passive
+// grind-into-zone entries and keeps only stop-hunt rejections. Backtest:
+// trade count drops ~50% but PF roughly doubles and peak DD drops to ~36%
+// of the no-rejection variant — which is the main reason the bot can be
+// sized up while still fitting funded eval rules.
+//
 // ─── Pyramiding ─────────────────────────────────────────────────────────
 // Up to PyramidingLimit same-direction concurrent tiers can stack within
 // one RTH day, all sharing the day's SL/TP. New tier only opens when
-// existing tiers are in profit (RequireProfitToPyramid), matching the
-// SqueezeMomentumBot pyramid logic. Limit=1 disables pyramiding.
+// existing tiers are in profit (RequireProfitToPyramid). For this regime
+// (rejection ON, NQ M15) pyramiding past 1 doubled the worst-day without
+// improving annualized return — keep Pyramid=1 unless you re-optimize.
 //
-// ─── Defaults from RumersGridSearch (5y NQ M15, 1620 configs) ───────────
-//   Composite-best (PF × log10(1+trades) − maxDD/$5k):
-//     lookback=120, buffer=5, minRR=1.5, tpFrac=0.75,
-//     pyramidingLimit=1, requireProfitToPyramid=true
-//   →  PF 1.56, +$9,466/yr, $5,486 maxYrDD, 180 trades, win 42.8%
+// ─── Defaults (eval-tuned: the5ers $100k cTrader, 2.5 NQ size) ──────────
+//   lookback=30, buffer=10, minRR=2.0, tpFrac=0.75, pyramid=1, rejection=on
+//   Volume=2.5 lots (≈ 25 MNQ-equivalent).
 //
-// Tune further with the cAlgo optimizer. All knobs are exposed.
+//   Backtest (5y NQ M15, 1 contract):
+//     88 trades · PF 2.17 · peakDD $3,110 · worst day -$2,925
+//
+//   Bootstrap monte-carlo at 2.5 NQ size (20k iter, 6-mo eval window):
+//     P(pass $8k target) = 47%   P(bust $4k daily / $10k DD) = 8%
+//     Median pass time   = 2.7 mo (when passing)
+//
+//   Pushing to 3.0 NQ: P(pass)=50%, P(bust)=14% — faster but higher risk.
+//   Dropping to 2.0 NQ: P(pass)=39%, P(bust)=8% — same bust risk, slower.
+//   2.5 NQ is the risk-adjusted sweet spot. See .lavish/rumers-bootstrap.html
+//   for the full sweep.
+//
+// All knobs exposed for the cAlgo optimizer.
 //
 // ─── Session timing ─────────────────────────────────────────────────────
 // Server-time → ET via TimeZoneInfo so the RTH gate stays correct across
@@ -30,8 +49,8 @@
 // brokers.
 //
 // Symbol: any NQ / NAS100 / US100 CFD on M15. Buffer is in the symbol's
-// price unit (NQ index points). On a 0.1-tick CFD, Buffer=5.0 = 50 ticks
-// ≈ 5 index points.
+// price unit (NQ index points). On a 0.1-tick CFD, Buffer=10.0 = 100 ticks
+// ≈ 10 index points.
 //
 // Indexing: cTrader 0 = OLDEST. All bar reads use Last(1) (the just-closed
 // bar).
@@ -47,20 +66,20 @@ namespace cAlgo.Robots
     public class RumersBot : Robot
     {
         // ────── Sizing ──────
-        [Parameter("Volume (lots)", DefaultValue = 1.0, MinValue = 0.01, Step = 0.01, Group = "Sizing")]
+        [Parameter("Volume (lots)", DefaultValue = 2.5, MinValue = 0.01, Step = 0.01, Group = "Sizing")]
         public double VolumeLots { get; set; }
 
         [Parameter("Label", DefaultValue = "Rumers", Group = "Sizing")]
         public string Label { get; set; }
 
-        // ────── Strategy knobs (grid-search optimum on 5y NQ M15) ──────
-        [Parameter("Lookback days", DefaultValue = 120, MinValue = 5, MaxValue = 250, Step = 5, Group = "Strategy")]
+        // ────── Strategy knobs (eval-tuned on 5y NQ M15) ──────
+        [Parameter("Lookback days", DefaultValue = 30, MinValue = 5, MaxValue = 250, Step = 5, Group = "Strategy")]
         public int LookbackDays { get; set; }
 
-        [Parameter("Buffer (price)", DefaultValue = 5.0, MinValue = 0.1, Step = 0.5, Group = "Strategy")]
+        [Parameter("Buffer (price)", DefaultValue = 10.0, MinValue = 0.1, Step = 0.5, Group = "Strategy")]
         public double Buffer { get; set; }
 
-        [Parameter("Min R:R", DefaultValue = 1.5, MinValue = 0.1, MaxValue = 5.0, Step = 0.1, Group = "Strategy")]
+        [Parameter("Min R:R", DefaultValue = 2.0, MinValue = 0.1, MaxValue = 5.0, Step = 0.1, Group = "Strategy")]
         public double MinRR { get; set; }
 
         [Parameter("TP fraction of range", DefaultValue = 0.75, MinValue = 0.05, MaxValue = 1.0, Step = 0.05, Group = "Strategy")]
@@ -68,6 +87,9 @@ namespace cAlgo.Robots
 
         [Parameter("Skip band", DefaultValue = 0.0, MinValue = 0.0, MaxValue = 0.49, Step = 0.05, Group = "Strategy")]
         public double SkipBand { get; set; }
+
+        [Parameter("Require rejection wick", DefaultValue = true, Group = "Strategy")]
+        public bool RequireRejection { get; set; }
 
         // ────── Pyramiding ──────
         [Parameter("Pyramid limit", DefaultValue = 1, MinValue = 1, MaxValue = 10, Step = 1, Group = "Pyramid")]
@@ -125,9 +147,11 @@ namespace cAlgo.Robots
             _et = ResolveEasternTimeZone();
             _serverUtcOffset = Server.Time - Server.TimeInUtc;
 
-            Print("Rumers ready. lb={0} buf={1} minRR={2:F1} tpFrac={3:F2} skipBand={4:F2} pyramid={5}/{6} | RTH {7:D2}:{8:D2}-{9} ET",
+            Print("Rumers ready. lb={0} buf={1} minRR={2:F1} tpFrac={3:F2} skipBand={4:F2} rej={5} pyramid={6}/{7} | vol={8}lots | RTH {9:D2}:{10:D2}-{11} ET",
                   LookbackDays, Buffer, MinRR, TpFrac, SkipBand,
+                  RequireRejection ? "on" : "off",
                   PyramidingLimit, RequireProfitToPyramid ? "profit-gated" : "no-gate",
+                  VolumeLots,
                   RthOpenHourEt, RthOpenMinEt, FmtEtClock(RthOpenMin + RthDurationMin));
         }
 
@@ -208,7 +232,9 @@ namespace cAlgo.Robots
                     double entryFloor = (MinRR * stop + tp) / (1.0 + MinRR);
                     // Profit gate: shorts profit when price drops, so new tier needs close < lastEntry.
                     bool profitOk = currentSide == 0 || !RequireProfitToPyramid || c < lastEntry;
-                    if (profitOk && c >= entryFloor && c <= _todaySH)
+                    // Rejection gate: this bar must have pierced SH and closed back inside.
+                    bool rejectionOk = !RequireRejection || h > _todaySH;
+                    if (profitOk && rejectionOk && c >= entryFloor && c <= _todaySH)
                     {
                         OpenAbs(TradeType.Sell, c, stop, tp);
                         _sharedSL = stop;
@@ -231,7 +257,8 @@ namespace cAlgo.Robots
                 {
                     double entryCeil = (MinRR * stop + tp) / (1.0 + MinRR);
                     bool profitOk = currentSide == 0 || !RequireProfitToPyramid || c > lastEntry;
-                    if (profitOk && c <= entryCeil && c >= _todaySL)
+                    bool rejectionOk = !RequireRejection || l < _todaySL;
+                    if (profitOk && rejectionOk && c <= entryCeil && c >= _todaySL)
                     {
                         OpenAbs(TradeType.Buy, c, stop, tp);
                         _sharedSL = stop;
