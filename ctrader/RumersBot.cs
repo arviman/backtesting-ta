@@ -25,21 +25,33 @@
 // (rejection ON, NQ M15) pyramiding past 1 doubled the worst-day without
 // improving annualized return — keep Pyramid=1 unless you re-optimize.
 //
-// ─── Defaults (eval-tuned: the5ers $100k cTrader, 2.5 NQ size) ──────────
+// ─── Defaults (eval-tuned: the5ers $100k cTrader on NAS100 CFD) ─────────
 //   lookback=30, buffer=10, minRR=2.0, tpFrac=0.75, pyramid=1, rejection=on
-//   Volume=2.5 lots (≈ 25 MNQ-equivalent).
+//   Volume=50 lots (NAS100 CFD on the5ers' Pepperstone broker = $1/pt/lot,
+//   so 50 lots → $50/pt, which matches a 2.5 NQ-futures position size).
 //
-//   Backtest (5y NQ M15, 1 contract):
+//   Backtest is on NQ futures (CME, $20/pt) at 1 contract:
 //     88 trades · PF 2.17 · peakDD $3,110 · worst day -$2,925
 //
-//   Bootstrap monte-carlo at 2.5 NQ size (20k iter, 6-mo eval window):
+//   Bootstrap monte-carlo (20k iter, 6-mo eval window, $50/pt sizing):
 //     P(pass $8k target) = 47%   P(bust $4k daily / $10k DD) = 8%
 //     Median pass time   = 2.7 mo (when passing)
 //
-//   Pushing to 3.0 NQ: P(pass)=50%, P(bust)=14% — faster but higher risk.
-//   Dropping to 2.0 NQ: P(pass)=39%, P(bust)=8% — same bust risk, slower.
-//   2.5 NQ is the risk-adjusted sweet spot. See .lavish/rumers-bootstrap.html
+//   Pushing to $60/pt (Volume=60): P(pass)=50%, P(bust)=14% — faster, riskier.
+//   Dropping to $40/pt (Volume=40): P(pass)=39%, P(bust)=8% — same risk, slower.
+//   $50/pt is the risk-adjusted sweet spot. See .lavish/rumers-bootstrap.html
 //   for the full sweep.
+//
+// ─── WARNING: VOLUME IS BROKER-SPECIFIC ────────────────────────────────
+// Volume=50 assumes the broker quotes NAS100 (or US100 / USTEC / NDX) as a
+// CFD where 1 lot = $1 per index point. This is the standard cTrader spec
+// on Pepperstone, IC Markets, and the5ers' broker integration.
+//
+// On a different broker, REASSESS Volume before going live:
+//   1. Open the symbol in cTrader → Symbol Info → check "Pip value" at 1 lot.
+//   2. Target $/pt = $50 (the backtest's eval-tuned size).
+//   3. Set Volume = $50 ÷ (broker's $ per pt per lot).
+// Examples: NQ futures at $20/pt → Volume = 2.5. MNQ micros at $2/pt → 25.
 //
 // All knobs exposed for the cAlgo optimizer.
 //
@@ -66,7 +78,9 @@ namespace cAlgo.Robots
     public class RumersBot : Robot
     {
         // ────── Sizing ──────
-        [Parameter("Volume (lots)", DefaultValue = 2.5, MinValue = 0.01, Step = 0.01, Group = "Sizing")]
+        // Default 50 = the5ers $100k on NAS100 CFD ($1/pt/lot brokers).
+        // For NQ futures use 2.5; for other brokers reassess (see header).
+        [Parameter("Volume (lots)", DefaultValue = 50, MinValue = 0.01, Step = 0.01, Group = "Sizing")]
         public double VolumeLots { get; set; }
 
         [Parameter("Label", DefaultValue = "Rumers", Group = "Sizing")]
